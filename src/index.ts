@@ -9,6 +9,7 @@ import {
 import { DirectoryWatcher, recursivelyClearFilesInDirectory } from "./files";
 import { downloadAllFilesFromPrefix, uploadFile } from "./s3";
 import { CommandExecutor } from "./commands";
+import path from "path";
 
 const {
   INPUT_DIR = "/input",
@@ -73,10 +74,11 @@ async function main() {
 
     const checkpointWatcher = new DirectoryWatcher(CHECKPOINT_DIR);
     checkpointWatcher.watchDirectory(async (localFilePath) => {
+      const relativeFilename = path.relative(CHECKPOINT_DIR, localFilePath);
       await uploadFile(
         localFilePath,
         work.checkpoint_bucket,
-        work.checkpoint_prefix
+        work.checkpoint_prefix + relativeFilename
       );
     });
 
