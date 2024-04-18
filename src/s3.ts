@@ -108,6 +108,9 @@ export async function downloadAllFilesFromPrefix(
           const key = object.Key!;
           // The filename should remove the prefix from the key
           const filename = key.replace(prefix, "");
+          if (!filename) {
+            return;
+          }
           const localFilePath = path.join(outputDir, filename);
           await downloadFile(bucket, key, localFilePath);
         })
