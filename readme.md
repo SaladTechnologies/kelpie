@@ -11,7 +11,7 @@ FROM yourimage:yourtag
 RUN apt-get update && install -y wget
 
 # kelpie is a standalone x86-64 linux binary
-RUN wget https://github.com/SaladTechnologies/kelpie/releases/download/0.0.1/kelpie -P / && chmod +x /kelpie
+RUN wget https://github.com/SaladTechnologies/kelpie/releases/download/0.0.5/kelpie -P / && chmod +x /kelpie
 
 CMD ["/kelpie"]
 ```
