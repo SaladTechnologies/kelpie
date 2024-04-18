@@ -1,6 +1,7 @@
-import { watch, FSWatcher } from "fs";
+import chokidar, { FSWatcher } from "chokidar";
 import { join } from "path";
 import fs from "fs/promises";
+import { Stats } from "fs";
 
 export class DirectoryWatcher {
   private watcher: FSWatcher | null = null;
@@ -14,20 +15,18 @@ export class DirectoryWatcher {
   // Start watching the directory
   watchDirectory(forEachFile: (localFilePath: string) => Promise<void>): void {
     console.log(`Watching directory: ${this.directory}`);
-    this.watcher = watch(
-      this.directory,
-      { recursive: true },
-      async (eventType, filename) => {
-        console.log(`Event: ${eventType} on ${filename}`);
-        if (filename && eventType === "change") {
-          const fullPath = join(this.directory, filename);
-          const task = forEachFile(fullPath).finally(() => {
-            this.activeTasks.delete(task);
-          });
-          this.activeTasks.add(task);
-        }
-      }
-    );
+    this.watcher = chokidar.watch(this.directory, {
+      ignored: /^\./,
+      persistent: true,
+    });
+
+    this.watcher.on("change", async (path: string, stats?: Stats) => {
+      console.log(`Event: change on ${path}`);
+      const task = forEachFile(path).finally(() => {
+        this.activeTasks.delete(task);
+      });
+      this.activeTasks.add(task);
+    });
   }
 
   // Stop watching the directory

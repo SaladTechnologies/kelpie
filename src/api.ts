@@ -58,6 +58,8 @@ export async function getWork(): Promise<Task | null> {
       if (work.length) {
         return work[0];
       }
+    } else {
+      console.error("Error getting work: ", await response.text());
     }
     return null;
   } catch (err) {

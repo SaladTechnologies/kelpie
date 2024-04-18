@@ -74,9 +74,9 @@ async function main() {
     const checkpointWatcher = new DirectoryWatcher(CHECKPOINT_DIR);
     checkpointWatcher.watchDirectory(async (localFilePath) => {
       await uploadFile(
+        localFilePath,
         work.checkpoint_bucket,
-        work.checkpoint_prefix,
-        localFilePath
+        work.checkpoint_prefix
       );
     });
 

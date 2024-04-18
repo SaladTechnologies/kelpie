@@ -8,7 +8,7 @@ Kelpie shepherds long-running jobs through to completion on interruptible hardwa
 FROM yourimage:yourtag
 
 # Install wget if it is not already present in your image
-RUN apt-get install -y wget
+RUN apt-get update && install -y wget
 
 # kelpie is a standalone x86-64 linux binary
 RUN wget https://github.com/SaladTechnologies/kelpie/releases/download/0.0.1/kelpie -P / && chmod +x /kelpie
