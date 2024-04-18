@@ -84,7 +84,12 @@ async function main() {
 
     const outputWatcher = new DirectoryWatcher(OUTPUT_DIR);
     outputWatcher.watchDirectory(async (localFilePath) => {
-      await uploadFile(work.output_bucket, work.output_prefix, localFilePath);
+      const relativeFilename = path.relative(OUTPUT_DIR, localFilePath);
+      await uploadFile(
+        localFilePath,
+        work.output_bucket,
+        work.output_prefix + relativeFilename
+      );
     });
 
     heartbeatManager.startHeartbeat(work.id, async () => {
