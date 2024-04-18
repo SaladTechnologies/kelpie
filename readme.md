@@ -1,3 +1,4 @@
+![](./kelpie.png)
 # Kelpie (beta)
 
 Kelpie shepherds long-running jobs through to completion on interruptible hardware, coordinating with the Kelpie API
