@@ -9,6 +9,7 @@ import fs from "fs";
 import { pipeline, Readable } from "stream";
 import { promisify } from "util";
 import path from "path";
+import fsPromises from "fs/promises";
 
 const { AWS_REGION, AWS_DEFAULT_REGION } = process.env;
 
@@ -121,4 +122,48 @@ export async function downloadAllFilesFromPrefix(
   } catch (err) {
     console.error("Error downloading files: ", err);
   }
+}
+
+export async function uploadDirectory(
+  directory: string,
+  bucket: string,
+  prefix: string
+): Promise<void> {
+  try {
+    console.log(
+      `Uploading directory ${directory} to storage bucket: ${bucket}`
+    );
+    const fileList = await getAllFilePaths(directory);
+    await Promise.all(
+      fileList.map(async (filePath) => {
+        const localFilePath = path.join(directory, filePath);
+        const key = prefix + filePath;
+        await uploadFile(localFilePath, bucket, key);
+      })
+    );
+    console.log("Directory uploaded successfully");
+  } catch (err) {
+    console.error("Error uploading directory: ", err);
+  }
+}
+
+async function getAllFilePaths(dir: string): Promise<string[]> {
+  let fileList: string[] = [];
+
+  async function recurse(currentPath: string) {
+    const entries = await fsPromises.readdir(currentPath, {
+      withFileTypes: true,
+    });
+    for (let entry of entries) {
+      const fullPath = path.join(currentPath, entry.name);
+      if (entry.isDirectory()) {
+        await recurse(fullPath);
+      } else {
+        fileList.push(path.relative(dir, fullPath));
+      }
+    }
+  }
+
+  await recurse(dir);
+  return fileList;
 }

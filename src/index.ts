@@ -7,7 +7,7 @@ import {
   reportCompleted,
 } from "./api";
 import { DirectoryWatcher, recursivelyClearFilesInDirectory } from "./files";
-import { downloadAllFilesFromPrefix, uploadFile } from "./s3";
+import { downloadAllFilesFromPrefix, uploadDirectory, uploadFile } from "./s3";
 import { CommandExecutor } from "./commands";
 import path from "path";
 
@@ -107,8 +107,18 @@ async function main() {
 
       if (exitCode === 0) {
         await reportCompleted(work.id);
+        console.log(`Work completed successfully on job ${work.id}`);
+        await sleep(1000); // Sleep for a second to ensure the output files are written
+        await uploadDirectory(
+          OUTPUT_DIR,
+          work.output_bucket,
+          work.output_prefix
+        );
       } else {
         await reportFailed(work.id);
+        console.error(
+          `Work failed with exit code ${exitCode} on job ${work.id}`
+        );
       }
     } catch (e: any) {
       if (/terminated due to signal/i.test(e.message)) {
@@ -118,8 +128,8 @@ async function main() {
         await reportFailed(work.id);
       }
     }
-    await outputWatcher.stopWatching();
     await checkpointWatcher.stopWatching();
+    await outputWatcher.stopWatching();
     heartbeatManager.stopHeartbeat();
     await clearAllDirectories();
   }
