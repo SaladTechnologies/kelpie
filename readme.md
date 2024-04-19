@@ -35,7 +35,7 @@ Additionally, your script must support the following things:
 
 ## What it DOES NOT do
 
-1. kelpie does not store your data, it merely facilitates syncing your data from local node storage to your preferred s3-compatible storage.
+1. kelpie does not store your data on our servers or in our storage buckets, beyond the job definition you submit. It merely facilitates syncing your data from local node storage to your preferred s3-compatible storage.
 2. kelpie does not monitor the ongoing progress of your job, beyond ensuring it eventually exits successfully. You should integrate your own monitoring solution, e.g. [Weights and Balances](https://wandb.ai/)
 3. kelpie does not containerize your job for you. It provides a binary that can be added to existing containerized jobs.
 4. kelpie does not create, start, stop, or scale your container groups. It merely hands work out to your container group, and reallocates nodes that have exceeded their maximum failure threshold (5 failures). This reallocation behavior is dependent on adding the kelpie user to your Salad organization.
