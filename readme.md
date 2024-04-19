@@ -3,6 +3,24 @@
 
 Kelpie shepherds long-running jobs through to completion on interruptible hardware, coordinating with the Kelpie API
 
+- [Kelpie (beta)](#kelpie-beta)
+  - [Adding the kelpie Worker To Your Container Image](#adding-the-kelpie-worker-to-your-container-image)
+  - [What it DOES NOT do](#what-it-does-not-do)
+  - [API Authorization](#api-authorization)
+    - [Base URL](#base-url)
+  - [Queueing a job](#queueing-a-job)
+    - [`POST /job`](#post-job)
+  - [Canceling a job](#canceling-a-job)
+    - [`DELETE /jobs/:id`](#delete-jobsid)
+  - [Checking on a job](#checking-on-a-job)
+    - [`GET /jobs/:id`](#get-jobsid)
+  - [Listing Your Jobs](#listing-your-jobs)
+    - [`GET /jobs`](#get-jobs)
+  - [Job Lifecycle](#job-lifecycle)
+  - [Status Webhooks](#status-webhooks)
+    - [Webhook Authorization](#webhook-authorization)
+
+
 ## Adding the kelpie Worker To Your Container Image
 
 ```dockerfile
