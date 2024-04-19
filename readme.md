@@ -245,3 +245,7 @@ If you provide a url in the webhook field, the Kelpie API will send status webho
 ```
 
 Webhook status may be `running`, `failed`, or `completed`
+
+### Webhook Authorization
+
+Webhooks sent by the Kelpie API will be secured with your API token in the `X-Kelpie-Key` header.
