@@ -30,7 +30,7 @@ FROM yourimage:yourtag
 RUN apt-get update && install -y wget
 
 # kelpie is a standalone x86-64 linux binary
-RUN wget https://github.com/SaladTechnologies/kelpie/releases/download/0.0.7/kelpie -P / && chmod +x /kelpie
+RUN wget https://github.com/SaladTechnologies/kelpie/releases/download/0.0.7/kelpie -O /kelpie && chmod +x /kelpie
 
 CMD ["/kelpie"]
 ```
