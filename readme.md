@@ -237,8 +237,10 @@ If you provide a url in the webhook field, the Kelpie API will send status webho
 
 ```json
 {
-  "status": "running", // 'completed', 'failed'
+  "status": "running",
   "job_id": "some-job-id",
   "machine_id": "some-machine-id",
   "container_group_id": "some-container-group-id"
 }
+
+Webhook status may be `running`, `failed`, or `completed`
