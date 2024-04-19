@@ -33,23 +33,38 @@ Additionally, your script must support the following things:
 - Saving and Resuming From Checkpoints: Your script should periodically output progress checkpoints to `CHECKPOINT_DIR`, so that the job can be resumed if it gets interrupted. Similarly, when your script starts, it should check `CHECKPOINT_DIR` to see if there is anything to resume, and only start from the beginning if no checkpoint is present.
 - It must exit "successfully" with an exit code of 0 upon completion.
 
+## What it DOES NOT do
+
+1. kelpie does not store your data, it merely facilitates syncing your data from local node storage to your preferred s3-compatible storage.
+2. kelpie does not monitor the ongoing progress of your job, beyond ensuring it eventually exits successfully. You should integrate your own monitoring solution, e.g. [Weights and Balances](https://wandb.ai/)
+3. kelpie does not containerize your job for you. It provides a binary that can be added to existing containerized jobs.
+4. kelpie does not create, start, stop, or scale your container groups. It merely hands work out to your container group, and reallocates nodes that have exceeded their maximum failure threshold (5 failures). This reallocation behavior is dependent on adding the kelpie user to your Salad organization.
+
+## API Authorization
+
+Your kelpie api key is used by you to submit work, and also by kelpie workers to pull and process work.
+
+All requests to the Kelpie API must include the header:
+
+`X-Kelpie-Key: myapikey`
+
+### Base URL
+
+All API requests should use a base url of `https://kelpie.saladexamples.com`.
+
 ## Queueing a job
 
 Queueing a job for processing is a simple post request to the Kelpie API
 
-`POST /job`
+### `POST /job`
 
-with the header:
-
-`X-Kelpie-Key: myapikey`
-
-with a JSON request body:
+**Request Body**
 
 ```json
 {
   "command": "python",
   "arguments": [
-    "/path/to/main.py"
+    "/path/to/main.py",
     "--arg",
     "value"
   ],
@@ -64,12 +79,166 @@ with a JSON request body:
 }
 ```
 
+**Response Body**
+
+```json
+{
+  "id": "8b9c902c-7da6-4af3-be0b-59cd4487895a",
+  "user_id": "your-user-id",
+  "status": "pending",
+  "created": "2024-04-19T18:53:31.000Z",
+  "started": null,
+  "completed": null,
+  "canceled": null,
+  "failed": null,
+  "command": "python",
+  "arguments": [
+    "/path/to/main.py",
+    "--arg",
+    "value"
+  ],
+  "input_bucket": "my-bucket",
+  "input_prefix": "inputs/job1/",
+  "checkpoint_bucket": "my-bucket",
+  "checkpoint_prefix": "checkpoints/job1/",
+  "output_bucket": "my-bucket",
+  "output_prefix": "outputs/job1/",
+  "webhook": "https://myapi.com/kelpie-webhooks",
+  "heartbeat": null,
+  "num_failures": 0,
+  "container_group_id": "97f504e8-6de6-4322-b5d5-1777a59a7ad3",
+  "machine_id": null
+}
+```
+
+## Canceling a job
+
+You can cancel a job using the job id
+
+### `DELETE /jobs/:id`
+
+**Response Body**
+
+```json
+{
+  "message": "Job canceled"
+}
+```
+
+## Checking on a job
+
+As mentioned above, Kelpie does not monitor the progress of your job, but it does track the status (pending, running, canceled, completed, failed). You can get a job using the job id:
+
+### `GET /jobs/:id`
+
+**Response Body**
+
+```json
+{
+  "id": "8b9c902c-7da6-4af3-be0b-59cd4487895a",
+  "user_id": "your-user-id",
+  "status": "pending",
+  "created": "2024-04-19T18:53:31.000Z",
+  "started": null,
+  "completed": null,
+  "canceled": null,
+  "failed": null,
+  "command": "python",
+  "arguments": [
+    "/path/to/main.py",
+    "--arg",
+    "value"
+  ],
+  "input_bucket": "my-bucket",
+  "input_prefix": "inputs/job1/",
+  "checkpoint_bucket": "my-bucket",
+  "checkpoint_prefix": "checkpoints/job1/",
+  "output_bucket": "my-bucket",
+  "output_prefix": "outputs/job1/",
+  "webhook": "https://myapi.com/kelpie-webhooks",
+  "heartbeat": null,
+  "num_failures": 0,
+  "container_group_id": "97f504e8-6de6-4322-b5d5-1777a59a7ad3",
+  "machine_id": null
+}
+```
+
+## Listing Your Jobs
+
+Get your jobs in bulk.
+
+### `GET /jobs`
+
+**Query Parameters**
+
+All query parameters for this endpoint are optional.
+
+| name               | description                                            | default |
+| ------------------ | ------------------------------------------------------ | ------- |
+| status             | pending, running, completed, canceled, failed          | *none*  |
+| container_group_id | query only jobs assigned to a specific container group | *none*  |
+| page_size          | How many jobs to return per page                       | 100     |
+| page               | Which page of jobs to query                            | 1       |
+| asc                | Boolean. Sort by `created`, ascending                  | false   |
+
+**Response Body**
+
+```json
+{
+  "_count": 1,
+  "jobs": [
+    {
+      "id": "8b9c902c-7da6-4af3-be0b-59cd4487895a",
+      "user_id": "your-user-id",
+      "status": "pending",
+      "created": "2024-04-19T18:53:31.000Z",
+      "started": null,
+      "completed": null,
+      "canceled": null,
+      "failed": null,
+      "command": "python",
+      "arguments": [
+        "/path/to/main.py",
+        "--arg",
+        "value"
+      ],
+      "input_bucket": "my-bucket",
+      "input_prefix": "inputs/job1/",
+      "checkpoint_bucket": "my-bucket",
+      "checkpoint_prefix": "checkpoints/job1/",
+      "output_bucket": "my-bucket",
+      "output_prefix": "outputs/job1/",
+      "webhook": "https://myapi.com/kelpie-webhooks",
+      "heartbeat": null,
+      "num_failures": 0,
+      "container_group_id": "97f504e8-6de6-4322-b5d5-1777a59a7ad3",
+      "machine_id": null
+    }
+  ]
+}
+```
+
+
 ## Job Lifecycle
 
 1. When kelpie starts on a new node, it starts polling for available work from `/work`. In these requests, it includes some information about what salad node you're on, including the machine id and container group id. This ensures we only hand out work to the correct container group, and that we do not hand out to a machine where that job has previously failed.
-2. Once it receives a job, kelpie downloads your inputs, and your checkpoint
-3. Once required files are downloaded, kelpie executes your command with the provided arguments, adding environment variables as documented above.
-4. Whenever files are added to the checkpoint directory, kelpie syncs the directory to the checkpoint bucket and prefix.
-5. Whenever files are added to the output directory, kelpie syncs the directory to the output bucket and prefix.
-6. When your command exits, the job is marked as complete, and a webhook is sent (if configured) to notify you about the job's completion.
-7. input, checkpoint, and output directories are purged, and the cycle begins again
+2. When a job is started, a webhook is sent, if configured.
+3. Once it receives a job, kelpie downloads your inputs, and your checkpoint
+4. Once required files are downloaded, kelpie executes your command with the provided arguments, adding environment variables as documented above.
+5. Whenever files are added to the checkpoint directory, kelpie syncs the directory to the checkpoint bucket and prefix.
+6. Whenever files are added to the output directory, kelpie syncs the directory to the output bucket and prefix.
+7. When your command exits 0, the job is marked as complete, and a webhook is sent (if configured) to notify you about the job's completion.
+   1. If your job fails, meaning exits non-0, it will be reported as a failure to the api. When this occurs, the number of failures for the job is incremented, up to 3. The machine id reporting the failure will be blocked from receiving that job again. If the job fails 3 times, it is marked failed, and a webhook is sent, if configured. If a machine id is blocked from 5 jobs, the container will be reallocated to a different machine, provided you have added the kelpie user to your salad org.
+8. input, checkpoint, and output directories are purged, and the cycle begins again
+
+## Status Webhooks
+
+If you provide a url in the webhook field, the Kelpie API will send status webhooks. It makes a `POST` request to the url provided, with a JSON request body:
+
+```json
+{
+  "status": "running", // 'completed', 'failed'
+  "job_id": "some-job-id",
+  "machine_id": "some-machine-id",
+  "container_group_id": "some-container-group-id"
+}
