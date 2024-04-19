@@ -1,7 +1,7 @@
 ![](./kelpie.png)
 # Kelpie (beta)
 
-Kelpie shepherds long-running jobs through to completion on interruptible hardware, coordinating with the Kelpie API
+Kelpie shepherds long-running jobs through to completion on interruptible hardware, coordinating with the [Kelpie API](https://github.com/SaladTechnologies/kelpie-api)
 
 - [Kelpie (beta)](#kelpie-beta)
   - [Adding the kelpie Worker To Your Container Image](#adding-the-kelpie-worker-to-your-container-image)
@@ -22,6 +22,8 @@ Kelpie shepherds long-running jobs through to completion on interruptible hardwa
 
 
 ## Adding the kelpie Worker To Your Container Image
+
+You can find a working example [here](https://github.com/SaladTechnologies/kelpie-demo)
 
 ```dockerfile
 FROM yourimage:yourtag
