@@ -4,6 +4,7 @@
 Kelpie shepherds long-running jobs through to completion on interruptible hardware, coordinating with the [Kelpie API](https://github.com/SaladTechnologies/kelpie-api)
 
 - [Kelpie (beta)](#kelpie-beta)
+  - [Who is it for?](#who-is-it-for)
   - [Adding the kelpie Worker To Your Container Image](#adding-the-kelpie-worker-to-your-container-image)
   - [What it DOES NOT do](#what-it-does-not-do)
   - [API Authorization](#api-authorization)
@@ -20,6 +21,12 @@ Kelpie shepherds long-running jobs through to completion on interruptible hardwa
   - [Status Webhooks](#status-webhooks)
     - [Webhook Authorization](#webhook-authorization)
 
+## Who is it for?
+
+Kelpie is for anyone who wants to run long running compute-intensive jobs on [Salad](https://salad.com/), whether that's [LoRA training](https://blog.salad.com/cost-effective-stable-diffusion-fine-tuning-on-salad/), Monte Carlo simulations, or anything else.
+You bring your own docker container that contains your script and dependencies, add the Kelpie binary to it, and deploy.
+
+If you'd like to join the Kelpie beta, and are an existing Salad customer, just reach out to your point of contact via email, discord, or slack. If you're interested in Kelpie and are new to Salad, [sign up for a demo](https://salad.com/get-a-demo), and mention you're interested in using Kelpie.
 
 ## Adding the kelpie Worker To Your Container Image
 
