@@ -10,7 +10,7 @@ Kelpie shepherds long-running jobs through to completion on interruptible hardwa
   - [API Authorization](#api-authorization)
     - [Base URL](#base-url)
   - [Queueing a job](#queueing-a-job)
-    - [`POST /job`](#post-job)
+    - [`POST /jobs`](#post-jobs)
   - [Canceling a job](#canceling-a-job)
     - [`DELETE /jobs/:id`](#delete-jobsid)
   - [Checking on a job](#checking-on-a-job)
@@ -68,6 +68,7 @@ Additionally, your script must support the following things:
 4. kelpie does not create, start, stop, or scale your container groups. It merely hands work out to your container group, and reallocates nodes that have exceeded their maximum failure threshold (5 failures). This reallocation behavior is dependent on adding the kelpie user to your Salad organization.
 
 ## API Authorization
+There are live swagger docs that should be considered more accurate and up to date than this readme: https://kelpie.saladexamples.com/docs
 
 Your kelpie api key is used by you to submit work, and also by kelpie workers to pull and process work.
 
