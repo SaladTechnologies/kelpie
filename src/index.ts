@@ -92,17 +92,21 @@ async function main() {
       );
     });
 
-    heartbeatManager.startHeartbeat(work.id, async () => {
-      await outputWatcher.stopWatching();
-      await checkpointWatcher.stopWatching();
-      commandExecutor.interrupt();
-    });
+    heartbeatManager.startHeartbeat(
+      work.id,
+      work.heartbeat_interval,
+      async () => {
+        await outputWatcher.stopWatching();
+        await checkpointWatcher.stopWatching();
+        commandExecutor.interrupt();
+      }
+    );
 
     try {
       const exitCode = await commandExecutor.execute(
         work.command,
         work.arguments,
-        { INPUT_DIR, OUTPUT_DIR, CHECKPOINT_DIR }
+        { ...work.environment, INPUT_DIR, OUTPUT_DIR, CHECKPOINT_DIR }
       );
 
       if (exitCode === 0) {

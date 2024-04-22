@@ -5,6 +5,7 @@ let {
   KELPIE_API_KEY,
   SALAD_MACHINE_ID = "",
   SALAD_CONTAINER_GROUP_ID = "",
+  MAX_RETRIES = "3",
 } = process.env;
 
 assert(KELPIE_API_URL, "KELPIE_API_URL is required");
@@ -13,6 +14,8 @@ assert(KELPIE_API_KEY, "KELPIE_API_KEY is required");
 if (KELPIE_API_URL.endsWith("/")) {
   KELPIE_API_URL = KELPIE_API_URL.slice(0, -1);
 }
+
+const maxRetries = parseInt(MAX_RETRIES, 10);
 
 const headers = {
   "Content-Type": "application/json",
@@ -33,88 +36,115 @@ interface Task {
   machine_id: string;
   command: string;
   arguments: any[];
+  environment: Record<string, string>;
   input_bucket: string;
   input_prefix: string;
   checkpoint_bucket: string;
   checkpoint_prefix: string;
   output_bucket: string;
   output_prefix: string;
+  heartbeat_interval: number;
+  max_failures: number;
   webhook?: string;
   container_group_id: string;
 }
 
+async function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function fetchUpToNTimes<T>(
+  url: string,
+  params: any,
+  n: number
+): Promise<T> {
+  let retries = 0;
+  while (retries < n) {
+    try {
+      const response = await fetch(url, params);
+      if (response.ok) {
+        return response.json() as Promise<T>;
+      } else {
+        console.error("Error fetching data, retrying: ", await response.text());
+        retries++;
+        await sleep(retries * 1000);
+        continue;
+      }
+    } catch (err: any) {
+      console.error("Error fetching data, retrying: ", err.message);
+      retries++;
+      await sleep(retries * 1000);
+      continue;
+    }
+  }
+  throw new Error("Failed to fetch data");
+}
+
 export async function getWork(): Promise<Task | null> {
-  try {
-    const query = new URLSearchParams({
-      machine_id: SALAD_MACHINE_ID,
-      container_group_id: SALAD_CONTAINER_GROUP_ID,
-    }).toString();
-    const response = await fetch(`${KELPIE_API_URL}/work?${query}`, {
+  const query = new URLSearchParams({
+    machine_id: SALAD_MACHINE_ID,
+    container_group_id: SALAD_CONTAINER_GROUP_ID,
+  }).toString();
+  const work = await fetchUpToNTimes<Task[]>(
+    `${KELPIE_API_URL}/work?${query}`,
+    {
       method: "GET",
       headers,
-    });
-    if (response.ok) {
-      const work = (await response.json()) as Task[];
-      if (work.length) {
-        return work[0];
-      }
-    } else {
-      console.error("Error getting work: ", await response.text());
-    }
-    return null;
-  } catch (err) {
-    console.error("Error getting work: ", err);
-    return null;
+    },
+    maxRetries
+  );
+  if (work.length) {
+    return work[0];
   }
+  return null;
 }
 
 export async function sendHeartbeat(
   jobId: string
 ): Promise<{ status: Task["status"] }> {
-  const response = await fetch(`${KELPIE_API_URL}/jobs/${jobId}/heartbeat`, {
-    method: "POST",
-    headers,
-    body: JSON.stringify({
-      machine_id: SALAD_MACHINE_ID,
-      container_group_id: SALAD_CONTAINER_GROUP_ID,
-    }),
-  });
-  if (!response.ok) {
-    throw new Error(`Error sending heartbeat: ${await response.text()}`);
-  }
-  return response.json() as Promise<{ status: Task["status"] }>;
+  const { status } = await fetchUpToNTimes<{ status: Task["status"] }>(
+    `${KELPIE_API_URL}/jobs/${jobId}/heartbeat`,
+    {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        machine_id: SALAD_MACHINE_ID,
+        container_group_id: SALAD_CONTAINER_GROUP_ID,
+      }),
+    },
+    maxRetries
+  );
+  return { status };
 }
 
 export async function reportFailed(jobId: string): Promise<void> {
-  const response = await fetch(`${KELPIE_API_URL}/jobs/${jobId}/failed`, {
-    method: "POST",
-    headers,
-    body: JSON.stringify({
-      machine_id: SALAD_MACHINE_ID,
-      container_group_id: SALAD_CONTAINER_GROUP_ID,
-    }),
-  });
-  if (!response.ok) {
-    throw new Error(`Error reporting failed: ${await response.text()}`);
-  }
+  await fetchUpToNTimes(
+    `${KELPIE_API_URL}/jobs/${jobId}/failed`,
+    {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        machine_id: SALAD_MACHINE_ID,
+        container_group_id: SALAD_CONTAINER_GROUP_ID,
+      }),
+    },
+    maxRetries
+  );
 }
 
 export async function reportCompleted(jobId: string): Promise<void> {
-  const response = await fetch(`${KELPIE_API_URL}/jobs/${jobId}/completed`, {
-    method: "POST",
-    headers,
-    body: JSON.stringify({
-      machine_id: SALAD_MACHINE_ID,
-      container_group_id: SALAD_CONTAINER_GROUP_ID,
-    }),
-  });
-  if (!response.ok) {
-    throw new Error(`Error reporting completed: ${await response.text()}`);
-  }
-}
-
-async function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+  await fetchUpToNTimes(
+    `${KELPIE_API_URL}/jobs/${jobId}/completed`,
+    {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        machine_id: SALAD_MACHINE_ID,
+        container_group_id: SALAD_CONTAINER_GROUP_ID,
+      }),
+    },
+    maxRetries
+  );
 }
 
 export class HeartbeatManager {
@@ -123,6 +153,7 @@ export class HeartbeatManager {
   // Starts the heartbeat loop
   async startHeartbeat(
     jobId: string,
+    interval_s: number = 30,
     onCanceled: () => Promise<void>
   ): Promise<void> {
     this.active = true; // Set the loop to be active
@@ -135,7 +166,7 @@ export class HeartbeatManager {
         await onCanceled();
         break;
       }
-      await sleep(30000); // Wait for 30 seconds before the next heartbeat
+      await sleep(interval_s * 1000); // Wait for 30 seconds before the next heartbeat
     }
 
     console.log("Heartbeat stopped.");
