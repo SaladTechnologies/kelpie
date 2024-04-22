@@ -83,7 +83,7 @@ All API requests should use a base url of `https://kelpie.saladexamples.com`.
 
 Queueing a job for processing is a simple post request to the Kelpie API
 
-### `POST /job`
+### `POST /jobs`
 
 **Request Body**
 
