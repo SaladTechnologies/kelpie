@@ -68,6 +68,20 @@ async function main() {
     }
     console.log(`Received work: ${work.id}`);
 
+    console.log("Starting heartbeat manager...");
+    const checkpointWatcher = new DirectoryWatcher(CHECKPOINT_DIR);
+    const outputWatcher = new DirectoryWatcher(OUTPUT_DIR);
+
+    heartbeatManager.startHeartbeat(
+      work.id,
+      work.heartbeat_interval,
+      async () => {
+        await outputWatcher.stopWatching();
+        await checkpointWatcher.stopWatching();
+        commandExecutor.interrupt();
+      }
+    );
+
     // Download required files
     try {
       await downloadAllFilesFromPrefix(
@@ -96,7 +110,7 @@ async function main() {
     console.log(
       "All files downloaded successfully, starting directory watchers..."
     );
-    const checkpointWatcher = new DirectoryWatcher(CHECKPOINT_DIR);
+
     checkpointWatcher.watchDirectory(async (localFilePath) => {
       const relativeFilename = path.relative(CHECKPOINT_DIR, localFilePath);
       await uploadFile(
@@ -106,7 +120,6 @@ async function main() {
       );
     });
 
-    const outputWatcher = new DirectoryWatcher(OUTPUT_DIR);
     outputWatcher.watchDirectory(async (localFilePath) => {
       const relativeFilename = path.relative(OUTPUT_DIR, localFilePath);
       await uploadFile(
@@ -115,17 +128,6 @@ async function main() {
         work.output_prefix + relativeFilename
       );
     });
-
-    console.log("Starting heartbeat manager...");
-    heartbeatManager.startHeartbeat(
-      work.id,
-      work.heartbeat_interval,
-      async () => {
-        await outputWatcher.stopWatching();
-        await checkpointWatcher.stopWatching();
-        commandExecutor.interrupt();
-      }
-    );
 
     try {
       const exitCode = await commandExecutor.execute(
