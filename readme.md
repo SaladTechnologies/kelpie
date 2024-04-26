@@ -65,7 +65,7 @@ Additionally, your script must support the following things:
 1. kelpie does not store your data on our servers or in our storage buckets, beyond the job definition you submit. It merely facilitates syncing your data from local node storage to your preferred s3-compatible storage.
 2. kelpie does not monitor the ongoing progress of your job, beyond ensuring it eventually exits successfully. You should integrate your own monitoring solution, e.g. [Weights and Balances](https://wandb.ai/)
 3. kelpie does not containerize your job for you. It provides a binary that can be added to existing containerized jobs.
-4. kelpie does not create, start, stop, or scale your container groups. It merely hands work out to your container group, and reallocates nodes that have exceeded their maximum failure threshold (5 failures). This reallocation behavior is dependent on adding the kelpie user to your Salad organization.
+4. kelpie does not create or delete your container groups. If configured with scaling rules, kelpie can start, stop, and scale your container group in response to job volume.
 
 ## API Authorization
 There are live swagger docs that should be considered more accurate and up to date than this readme: https://kelpie.saladexamples.com/docs
@@ -96,6 +96,7 @@ Queueing a job for processing is a simple post request to the Kelpie API
     "--arg",
     "value"
   ],
+  "environment": { "SOME_VAR": "string"},
   "input_bucket": "my-bucket",
   "input_prefix": "inputs/job1/",
   "checkpoint_bucket": "my-bucket",
@@ -125,6 +126,7 @@ Queueing a job for processing is a simple post request to the Kelpie API
     "--arg",
     "value"
   ],
+  "environment": { "SOME_VAR": "string"},
   "input_bucket": "my-bucket",
   "input_prefix": "inputs/job1/",
   "checkpoint_bucket": "my-bucket",
