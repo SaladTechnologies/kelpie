@@ -1,9 +1,9 @@
 ![](./kelpie.png)
-# Kelpie (beta)
+# 🐕 Kelpie (beta)
 
 Kelpie shepherds long-running jobs through to completion on interruptible hardware, coordinating with the [Kelpie API](https://github.com/SaladTechnologies/kelpie-api)
 
-- [Kelpie (beta)](#kelpie-beta)
+- [🐕 Kelpie (beta)](#-kelpie-beta)
   - [Who is it for?](#who-is-it-for)
   - [Adding the kelpie Worker To Your Container Image](#adding-the-kelpie-worker-to-your-container-image)
   - [What it DOES NOT do](#what-it-does-not-do)
