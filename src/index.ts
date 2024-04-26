@@ -44,6 +44,7 @@ process.on("SIGINT", () => {
 
 process.on("SIGTERM", () => {
   keepAlive = false;
+  console.log("Received SIGTERM, stopping...");
   process.exit();
 });
 
@@ -51,27 +52,50 @@ async function main() {
   await clearAllDirectories();
 
   while (keepAlive) {
-    const work = await getWork();
+    let work;
+    try {
+      work = await getWork();
+    } catch (e: any) {
+      console.error("Error fetching work: ", e);
+      await sleep(10000);
+      continue;
+    }
+
     if (!work) {
       console.log("No work available, sleeping for 10 seconds...");
       await sleep(10000);
       continue;
     }
+    console.log(`Received work: ${work.id}`);
 
     // Download required files
-    await Promise.all([
-      downloadAllFilesFromPrefix(
+    try {
+      await downloadAllFilesFromPrefix(
         work.input_bucket,
         work.input_prefix,
         INPUT_DIR
-      ),
-      downloadAllFilesFromPrefix(
+      );
+    } catch (e: any) {
+      console.error("Error downloading input files: ", e);
+      // await reportFailed(work.id);
+      continue;
+    }
+
+    try {
+      await downloadAllFilesFromPrefix(
         work.checkpoint_bucket,
         work.checkpoint_prefix,
         CHECKPOINT_DIR
-      ),
-    ]);
+      );
+    } catch (e: any) {
+      console.error("Error downloading checkpoint files: ", e);
+      // await reportFailed(work.id);
+      continue;
+    }
 
+    console.log(
+      "All files downloaded successfully, starting directory watchers..."
+    );
     const checkpointWatcher = new DirectoryWatcher(CHECKPOINT_DIR);
     checkpointWatcher.watchDirectory(async (localFilePath) => {
       const relativeFilename = path.relative(CHECKPOINT_DIR, localFilePath);
@@ -92,6 +116,7 @@ async function main() {
       );
     });
 
+    console.log("Starting heartbeat manager...");
     heartbeatManager.startHeartbeat(
       work.id,
       work.heartbeat_interval,
@@ -139,4 +164,4 @@ async function main() {
   }
 }
 
-main();
+main().then(() => console.log("Kelpie Exiting"));

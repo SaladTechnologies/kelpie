@@ -118,6 +118,7 @@ export async function sendHeartbeat(
 }
 
 export async function reportFailed(jobId: string): Promise<void> {
+  console.log(`Reporting job ${jobId} as failed`);
   await fetchUpToNTimes(
     `${KELPIE_API_URL}/jobs/${jobId}/failed`,
     {
@@ -133,6 +134,7 @@ export async function reportFailed(jobId: string): Promise<void> {
 }
 
 export async function reportCompleted(jobId: string): Promise<void> {
+  console.log(`Reporting job ${jobId} as completed`);
   await fetchUpToNTimes(
     `${KELPIE_API_URL}/jobs/${jobId}/completed`,
     {

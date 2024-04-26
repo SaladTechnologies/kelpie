@@ -1,21 +1,19 @@
 import {
   S3Client,
   GetObjectCommand,
-  ListObjectsCommand,
-  PutObjectCommand,
+  ListObjectsV2Command,
+  ListObjectsV2CommandInput,
 } from "@aws-sdk/client-s3";
 import { Progress, Upload } from "@aws-sdk/lib-storage";
 import fs from "fs";
-import { pipeline, Readable } from "stream";
-import { promisify } from "util";
+import { Readable } from "stream";
+
 import path from "path";
 import fsPromises from "fs/promises";
 
 const { AWS_REGION, AWS_DEFAULT_REGION } = process.env;
 
 const s3Client = new S3Client({ region: AWS_REGION || AWS_DEFAULT_REGION });
-
-const pipelineAsync = promisify(pipeline);
 
 export async function uploadFile(
   localFilePath: string,
@@ -73,52 +71,103 @@ export async function downloadFile(
     // Perform the download
     const data = await s3Client.send(new GetObjectCommand(downloadParams));
 
-    if (data.Body) {
-      const readableStream = new Readable().wrap(
-        data.Body as NodeJS.ReadableStream
-      );
-      const fileStream = fs.createWriteStream(localFilePath);
-      await pipelineAsync(readableStream, fileStream);
+    return new Promise((resolve, reject) => {
+      if (data.Body instanceof Readable) {
+        // Loop through body chunks and write to file
+        const writeStream = fs.createWriteStream(localFilePath);
+        data.Body.pipe(writeStream)
+          .on("error", (err: any) => reject(err))
+          .on("close", () => resolve());
+      }
+    });
+  } catch (err: any) {
+    console.error("Error downloading file: ", err);
+    throw err;
+  }
+}
+
+async function listAllS3Objects(
+  bucketName: string,
+  prefix?: string
+): Promise<string[]> {
+  let continuationToken: string | undefined = undefined;
+  const allKeys: string[] = [];
+
+  do {
+    const params: ListObjectsV2CommandInput = {
+      Bucket: bucketName,
+      Prefix: prefix,
+      ContinuationToken: continuationToken,
+    };
+
+    const command = new ListObjectsV2Command(params);
+    const response = await s3Client.send(command);
+
+    // Collect all keys from the current batch
+    if (response.Contents) {
+      response.Contents.forEach((item) => {
+        if (item.Key) {
+          allKeys.push(item.Key);
+        }
+      });
     }
 
-    console.log("Download completed successfully");
-  } catch (err) {
-    console.error("Error downloading file: ", err);
-  }
+    // Update the continuation token
+    continuationToken = response.NextContinuationToken;
+  } while (continuationToken);
+
+  return allKeys;
+}
+
+async function processBatch(
+  batch: string[],
+  bucket: string,
+  prefix: string,
+  outputDir: string
+) {
+  const downloadPromises = batch.map((key) => {
+    const filename = key.replace(prefix, "");
+    const localFilePath = path.join(outputDir, filename);
+    return downloadFile(bucket, key, localFilePath);
+  });
+
+  const results = await Promise.allSettled(downloadPromises);
+  results.forEach((result, index) => {
+    if (result.status === "rejected") {
+      console.error(`Download failed for ${batch[index]}: ${result.reason}`);
+    }
+  });
+  console.log(
+    `Batch processed with ${
+      results.filter((r) => r.status === "fulfilled").length
+    } successes and ${
+      results.filter((r) => r.status === "rejected").length
+    } failures.`
+  );
 }
 
 export async function downloadAllFilesFromPrefix(
   bucket: string,
   prefix: string,
-  outputDir: string
+  outputDir: string,
+  batchSize: number = 10
 ): Promise<void> {
   try {
     console.log(
       `Downloading all files with prefix ${prefix} from storage bucket: ${bucket}`
     );
-    const listObjectsParams = {
-      Bucket: bucket,
-      Prefix: prefix,
-    };
+    const allKeys = await listAllS3Objects(bucket, prefix);
+    console.log(`Found ${allKeys.length} files to download`);
 
-    const data = await s3Client.send(new ListObjectsCommand(listObjectsParams));
-
-    if (data.Contents) {
-      await Promise.all(
-        data.Contents.map(async (object) => {
-          const key = object.Key!;
-          // The filename should remove the prefix from the key
-          const filename = key.replace(prefix, "");
-          if (!filename) {
-            return;
-          }
-          const localFilePath = path.join(outputDir, filename);
-          await downloadFile(bucket, key, localFilePath);
-        })
-      );
+    // Download files in batches
+    for (let i = 0; i < allKeys.length; i += batchSize) {
+      const batch = allKeys.slice(i, i + batchSize);
+      await processBatch(batch, bucket, prefix, outputDir);
     }
 
-    console.log("Download completed successfully");
+    console.log(
+      `All files from s3://${bucket}/${prefix} downloaded to ${outputDir} successfully`
+    );
   } catch (err) {
     console.error("Error downloading files: ", err);
   }
@@ -127,20 +176,25 @@ export async function downloadAllFilesFromPrefix(
 export async function uploadDirectory(
   directory: string,
   bucket: string,
-  prefix: string
+  prefix: string,
+  batchSize: number = 10
 ): Promise<void> {
   try {
     console.log(
       `Uploading directory ${directory} to storage bucket: ${bucket}`
     );
     const fileList = await getAllFilePaths(directory);
-    await Promise.all(
-      fileList.map(async (filePath) => {
-        const localFilePath = path.join(directory, filePath);
-        const key = prefix + filePath;
-        await uploadFile(localFilePath, bucket, key);
-      })
-    );
+    console.log(`Found ${fileList.length} files to upload`);
+    for (let i = 0; i < fileList.length; i += batchSize) {
+      const batch = fileList.slice(i, i + batchSize);
+      await Promise.all(
+        batch.map(async (filePath) => {
+          const localFilePath = path.join(directory, filePath);
+          const key = prefix + filePath;
+          return await uploadFile(localFilePath, bucket, key);
+        })
+      );
+    }
     console.log("Directory uploaded successfully");
   } catch (err) {
     console.error("Error uploading directory: ", err);
