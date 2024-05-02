@@ -47,6 +47,7 @@ interface Task {
   max_failures: number;
   webhook?: string;
   container_group_id: string;
+  compression?: boolean;
 }
 
 async function sleep(ms: number): Promise<void> {

@@ -94,7 +94,8 @@ async function main() {
         work.input_bucket,
         work.input_prefix,
         INPUT_DIR,
-        20
+        20,
+        !!work.compression
       );
     } catch (e: any) {
       console.error("Error downloading input files: ", e);
@@ -107,7 +108,8 @@ async function main() {
         work.checkpoint_bucket,
         work.checkpoint_prefix,
         CHECKPOINT_DIR,
-        20
+        20,
+        !!work.compression
       );
     } catch (e: any) {
       console.error("Error downloading checkpoint files: ", e);
@@ -126,7 +128,8 @@ async function main() {
           await uploadFile(
             localFilePath,
             work.checkpoint_bucket,
-            work.checkpoint_prefix + relativeFilename
+            work.checkpoint_prefix + relativeFilename,
+            !!work.compression
           );
         } else if (eventType === "unlink") {
           await deleteFile(
@@ -145,7 +148,8 @@ async function main() {
             await uploadFile(
               localFilePath,
               work.output_bucket,
-              work.output_prefix + relativeFilename
+              work.output_prefix + relativeFilename,
+              !!work.compression
             );
           }
         }
@@ -166,7 +170,8 @@ async function main() {
           OUTPUT_DIR,
           work.output_bucket,
           work.output_prefix,
-          5
+          5,
+          !!work.compression
         );
         await reportCompleted(work.id);
       } else {
