@@ -1,7 +1,41 @@
 import chokidar, { FSWatcher } from "chokidar";
 import { join } from "path";
-import fs from "fs/promises";
+import fsPromises from "fs/promises";
 import { Stats } from "fs";
+import fs from "fs";
+
+// Function to check if the file has stopped changing
+function waitForFileStability(filePath: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    let lastKnownSize = -1;
+    let retries = 0;
+
+    const checkFile = () => {
+      fs.stat(filePath, (err, stats) => {
+        if (err) {
+          reject(`Error accessing file: ${err}`);
+          return;
+        }
+
+        if (stats.size === lastKnownSize) {
+          if (retries >= 3) {
+            // Consider the file stable after 3 checks
+            resolve();
+          } else {
+            retries++;
+            setTimeout(checkFile, 100); // Shortened interval due to smaller file size
+          }
+        } else {
+          lastKnownSize = stats.size;
+          retries = 0;
+          setTimeout(checkFile, 100);
+        }
+      });
+    };
+
+    checkFile();
+  });
+}
 
 export class DirectoryWatcher {
   private watcher: FSWatcher | null = null;
@@ -22,11 +56,13 @@ export class DirectoryWatcher {
       persistent: true,
     });
 
-    this.watcher.on("change", async (path: string, stats?: Stats) => {
-      console.log(`Event: change on ${path}`);
-      const task = forEachFile(path, "change").finally(() => {
-        this.activeTasks.delete(task);
-      });
+    this.watcher.on("add", async (path: string, stats?: Stats) => {
+      console.log(`Event: add on ${path}`);
+      const task = waitForFileStability(path)
+        .then(() => forEachFile(path, "add"))
+        .finally(() => {
+          this.activeTasks.delete(task);
+        });
       this.activeTasks.add(task);
     });
 
@@ -56,18 +92,18 @@ export async function recursivelyClearFilesInDirectory(
 ): Promise<void> {
   try {
     console.log(`Clearing files in directory: ${directory}`);
-    const files = await fs.readdir(directory);
+    const files = await fsPromises.readdir(directory);
     await Promise.all(
       files.map(async (file) => {
         const filePath = join(directory, file);
-        const stats = await fs.stat(filePath);
+        const stats = await fsPromises.stat(filePath);
         if (stats.isFile()) {
           console.log(`Removing file: ${filePath}`);
-          await fs.unlink(filePath);
+          await fsPromises.unlink(filePath);
         } else if (stats.isDirectory()) {
           await recursivelyClearFilesInDirectory(filePath);
           console.log(`Removing directory: ${filePath}`);
-          await fs.rmdir(filePath);
+          await fsPromises.rmdir(filePath);
         }
       })
     );

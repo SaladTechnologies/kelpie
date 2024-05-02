@@ -121,7 +121,7 @@ async function main() {
     checkpointWatcher.watchDirectory(
       async (localFilePath: string, eventType: string) => {
         const relativeFilename = path.relative(CHECKPOINT_DIR, localFilePath);
-        if (eventType === "change") {
+        if (eventType === "add") {
           await uploadFile(
             localFilePath,
             work.checkpoint_bucket,
@@ -140,7 +140,7 @@ async function main() {
       outputWatcher.watchDirectory(
         async (localFilePath: string, eventType: string) => {
           const relativeFilename = path.relative(OUTPUT_DIR, localFilePath);
-          if (eventType === "change") {
+          if (eventType === "add") {
             await uploadFile(
               localFilePath,
               work.output_bucket,
