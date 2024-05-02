@@ -13,7 +13,9 @@ export class DirectoryWatcher {
   }
 
   // Start watching the directory
-  watchDirectory(forEachFile: (localFilePath: string) => Promise<void>): void {
+  watchDirectory(
+    forEachFile: (localFilePath: string, eventType: string) => Promise<void>
+  ): void {
     console.log(`Watching directory: ${this.directory}`);
     this.watcher = chokidar.watch(this.directory, {
       ignored: /^\./,
@@ -22,7 +24,15 @@ export class DirectoryWatcher {
 
     this.watcher.on("change", async (path: string, stats?: Stats) => {
       console.log(`Event: change on ${path}`);
-      const task = forEachFile(path).finally(() => {
+      const task = forEachFile(path, "change").finally(() => {
+        this.activeTasks.delete(task);
+      });
+      this.activeTasks.add(task);
+    });
+
+    this.watcher.on("unlink", async (path: string) => {
+      console.log(`Event: unlink on ${path}`);
+      const task = forEachFile(path, "unlink").finally(() => {
         this.activeTasks.delete(task);
       });
       this.activeTasks.add(task);

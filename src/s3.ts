@@ -3,6 +3,7 @@ import {
   GetObjectCommand,
   ListObjectsV2Command,
   ListObjectsV2CommandInput,
+  DeleteObjectCommand,
 } from "@aws-sdk/client-s3";
 import { Progress, Upload } from "@aws-sdk/lib-storage";
 import fs from "fs";
@@ -125,9 +126,11 @@ async function processBatch(
   prefix: string,
   outputDir: string
 ) {
-  const downloadPromises = batch.map((key) => {
+  const downloadPromises = batch.map(async (key) => {
     const filename = key.replace(prefix, "");
     const localFilePath = path.join(outputDir, filename);
+    const dir = path.dirname(localFilePath);
+    await fsPromises.mkdir(dir, { recursive: true });
     return downloadFile(bucket, key, localFilePath);
   });
 
@@ -220,4 +223,18 @@ async function getAllFilePaths(dir: string): Promise<string[]> {
 
   await recurse(dir);
   return fileList;
+}
+
+export async function deleteFile(bucket: string, key: string): Promise<void> {
+  try {
+    console.log(`Deleting file s3://${bucket}/${key}`);
+    const params = {
+      Bucket: bucket,
+      Key: key,
+    };
+    await s3Client.send(new DeleteObjectCommand(params));
+    console.log("File deleted successfully");
+  } catch (err) {
+    console.error("Error deleting file: ", err);
+  }
 }

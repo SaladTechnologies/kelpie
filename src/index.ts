@@ -7,7 +7,12 @@ import {
   reportCompleted,
 } from "./api";
 import { DirectoryWatcher, recursivelyClearFilesInDirectory } from "./files";
-import { downloadAllFilesFromPrefix, uploadDirectory, uploadFile } from "./s3";
+import {
+  downloadAllFilesFromPrefix,
+  uploadDirectory,
+  uploadFile,
+  deleteFile,
+} from "./s3";
 import { CommandExecutor } from "./commands";
 import path from "path";
 
@@ -87,7 +92,8 @@ async function main() {
       await downloadAllFilesFromPrefix(
         work.input_bucket,
         work.input_prefix,
-        INPUT_DIR
+        INPUT_DIR,
+        20
       );
     } catch (e: any) {
       console.error("Error downloading input files: ", e);
@@ -99,7 +105,8 @@ async function main() {
       await downloadAllFilesFromPrefix(
         work.checkpoint_bucket,
         work.checkpoint_prefix,
-        CHECKPOINT_DIR
+        CHECKPOINT_DIR,
+        20
       );
     } catch (e: any) {
       console.error("Error downloading checkpoint files: ", e);
@@ -111,23 +118,38 @@ async function main() {
       "All files downloaded successfully, starting directory watchers..."
     );
 
-    checkpointWatcher.watchDirectory(async (localFilePath) => {
-      const relativeFilename = path.relative(CHECKPOINT_DIR, localFilePath);
-      await uploadFile(
-        localFilePath,
-        work.checkpoint_bucket,
-        work.checkpoint_prefix + relativeFilename
-      );
-    });
+    checkpointWatcher.watchDirectory(
+      async (localFilePath: string, eventType: string) => {
+        const relativeFilename = path.relative(CHECKPOINT_DIR, localFilePath);
+        if (eventType === "change") {
+          await uploadFile(
+            localFilePath,
+            work.checkpoint_bucket,
+            work.checkpoint_prefix + relativeFilename
+          );
+        } else if (eventType === "unlink") {
+          await deleteFile(
+            work.checkpoint_bucket,
+            work.checkpoint_prefix + relativeFilename
+          );
+        }
+      }
+    );
 
-    outputWatcher.watchDirectory(async (localFilePath) => {
-      const relativeFilename = path.relative(OUTPUT_DIR, localFilePath);
-      await uploadFile(
-        localFilePath,
-        work.output_bucket,
-        work.output_prefix + relativeFilename
+    if (CHECKPOINT_DIR !== OUTPUT_DIR) {
+      outputWatcher.watchDirectory(
+        async (localFilePath: string, eventType: string) => {
+          const relativeFilename = path.relative(OUTPUT_DIR, localFilePath);
+          if (eventType === "change") {
+            await uploadFile(
+              localFilePath,
+              work.output_bucket,
+              work.output_prefix + relativeFilename
+            );
+          }
+        }
       );
-    });
+    }
 
     try {
       const exitCode = await commandExecutor.execute(
