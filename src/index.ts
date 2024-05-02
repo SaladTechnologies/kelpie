@@ -15,6 +15,7 @@ import {
 } from "./s3";
 import { CommandExecutor } from "./commands";
 import path from "path";
+import { version } from "../package.json";
 
 const {
   INPUT_DIR = "/input",
@@ -30,11 +31,10 @@ const heartbeatManager = new HeartbeatManager();
 const commandExecutor = new CommandExecutor();
 
 async function clearAllDirectories(): Promise<void> {
-  await Promise.all([
-    recursivelyClearFilesInDirectory(INPUT_DIR),
-    recursivelyClearFilesInDirectory(OUTPUT_DIR),
-    recursivelyClearFilesInDirectory(CHECKPOINT_DIR),
-  ]);
+  const dirsToClear = Array.from(
+    new Set([INPUT_DIR, OUTPUT_DIR, CHECKPOINT_DIR])
+  );
+  await Promise.all(dirsToClear.map(recursivelyClearFilesInDirectory));
 }
 
 async function sleep(ms: number): Promise<void> {
@@ -54,6 +54,7 @@ process.on("SIGTERM", () => {
 });
 
 async function main() {
+  console.log(`Kelpie v${version} started`);
   await clearAllDirectories();
 
   while (keepAlive) {
@@ -159,14 +160,15 @@ async function main() {
       );
 
       if (exitCode === 0) {
-        await reportCompleted(work.id);
         console.log(`Work completed successfully on job ${work.id}`);
         await sleep(1000); // Sleep for a second to ensure the output files are written
         await uploadDirectory(
           OUTPUT_DIR,
           work.output_bucket,
-          work.output_prefix
+          work.output_prefix,
+          5
         );
+        await reportCompleted(work.id);
       } else {
         await reportFailed(work.id);
         console.error(

@@ -22,9 +22,7 @@ export async function uploadFile(
   key: string
 ): Promise<void> {
   try {
-    console.log(
-      `Uploading file ${localFilePath} to storage bucket: ${bucketName}/${key}`
-    );
+    console.log(`Uploading ${localFilePath} to s3://${bucketName}/${key}`);
     // Create a stream from the local file
     const fileStream = fs.createReadStream(localFilePath);
 
@@ -39,11 +37,41 @@ export async function uploadFile(
     const parallelUploads3 = new Upload({
       client: s3Client,
       params: uploadParams,
+      queueSize: 4,
+      partSize: 5 * 1024 * 1024,
     });
 
     // Track progress
     parallelUploads3.on("httpUploadProgress", (progress: Progress) => {
-      console.log(`Uploaded ${progress.loaded} out of ${progress.total} bytes`);
+      let sizeString = "";
+      if (
+        progress.loaded &&
+        progress.total &&
+        progress.total > 1024 * 1024 * 1024
+      ) {
+        const totalGB = (progress.total / (1024 * 1024 * 1024)).toFixed(2);
+        const progressGB = (progress.loaded / (1024 * 1024 * 1024)).toFixed(2);
+        sizeString = `(${progressGB}/${totalGB} GB)`;
+      } else if (
+        progress.loaded &&
+        progress.total &&
+        progress.total > 1024 * 1024
+      ) {
+        const totalMB = (progress.total / (1024 * 1024)).toFixed(2);
+        const progressMB = (progress.loaded / (1024 * 1024)).toFixed(2);
+        sizeString = `(${progressMB}/${totalMB} MB)`;
+      } else if (progress.loaded && progress.total && progress.total > 1024) {
+        const totalKB = (progress.total / 1024).toFixed(2);
+        const progressKB = (progress.loaded / 1024).toFixed(2);
+        sizeString = `(${progressKB}/${totalKB} KB)`;
+      } else if (progress.loaded && progress.total) {
+        sizeString = `(${progress.loaded}/${progress.total} B)`;
+      }
+      console.log(
+        `Uploaded ${((progress.loaded! / progress.total!) * 100).toFixed(
+          2
+        )}% ${sizeString}`
+      );
     });
 
     // Wait for the upload to finish
@@ -60,9 +88,7 @@ export async function downloadFile(
   localFilePath: string
 ): Promise<void> {
   try {
-    console.log(
-      `Downloading file ${localFilePath} from storage bucket: ${bucketName}/${key}`
-    );
+    const start = Date.now();
     // Set up the download parameters
     const downloadParams = {
       Bucket: bucketName,
@@ -78,7 +104,22 @@ export async function downloadFile(
         const writeStream = fs.createWriteStream(localFilePath);
         data.Body.pipe(writeStream)
           .on("error", (err: any) => reject(err))
-          .on("close", () => resolve());
+          .on("close", () => {
+            const end = Date.now();
+
+            // Build a duration string that uses at most 2 significant figures (e.g. 1.2s, 1.23s, 1.23m)
+            let durString = "";
+            let durMs = end - start;
+            if (durMs < 1000) {
+              durString = `${durMs}ms`;
+            } else if (durMs < 60000) {
+              durString = `${(durMs / 1000).toFixed(2)}s`;
+            } else {
+              durString = `${(durMs / 60000).toFixed(2)}m`;
+            }
+            console.log(`${localFilePath} downloaded in ${durString}`);
+            resolve();
+          });
       }
     });
   } catch (err: any) {
@@ -140,13 +181,6 @@ async function processBatch(
       console.error(`Download failed for ${batch[index]}: ${result.reason}`);
     }
   });
-  console.log(
-    `Batch processed with ${
-      results.filter((r) => r.status === "fulfilled").length
-    } successes and ${
-      results.filter((r) => r.status === "rejected").length
-    } failures.`
-  );
 }
 
 export async function downloadAllFilesFromPrefix(
