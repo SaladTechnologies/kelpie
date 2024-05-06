@@ -70,7 +70,7 @@ export async function uploadFile(
     const fileStream = fs.createReadStream(localFilePath);
     let stream;
     if (compress) {
-      log.info(`Compressing ${localFilePath} file with gzip`);
+      log.debug(`Compressing ${localFilePath} file with gzip`);
       const gzipStream = createGzip();
       fileStream.pipe(gzipStream);
       stream = gzipStream;
@@ -143,7 +143,7 @@ export async function downloadFile(
       if (data.Body instanceof Readable) {
         let stream: Readable = data.Body;
         if (isGzipped) {
-          log.info(`Decompressing ${key} file with gunzip`);
+          log.debug(`Decompressing ${key} file with gunzip`);
           stream = stream.pipe(createGunzip());
         }
 
