@@ -66,6 +66,16 @@ export class DirectoryWatcher {
       this.activeTasks.add(task);
     });
 
+    this.watcher.on("change", async (path: string, stats?: Stats) => {
+      console.log(`Event: change on ${path}`);
+      const task = waitForFileStability(path)
+        .then(() => forEachFile(path, "change"))
+        .finally(() => {
+          this.activeTasks.delete(task);
+        });
+      this.activeTasks.add(task);
+    });
+
     this.watcher.on("unlink", async (path: string) => {
       console.log(`Event: unlink on ${path}`);
       const task = forEachFile(path, "unlink").finally(() => {

@@ -46,12 +46,15 @@ export async function uploadFile(
     console.log(`Uploading ${localFilePath} to s3://${bucketName}/${key}`);
     // Create a stream from the local file
     const fileStream = fs.createReadStream(localFilePath);
-    let stream = fileStream;
+    let stream;
     if (compress) {
       console.log(`Compressing ${localFilePath} file with gzip`);
-      stream = createGzip();
-      fileStream.pipe(createGzip());
+      const gzipStream = createGzip();
+      fileStream.pipe(gzipStream);
+      stream = gzipStream;
       key = key + ".gz";
+    } else {
+      stream = fileStream;
     }
 
     // Set up the upload parameters
@@ -73,9 +76,10 @@ export async function uploadFile(
     parallelUploads3.on("httpUploadProgress", (progress: Progress) => {
       let sizeString = getDataRatioString(progress.loaded!, progress.total!);
       console.log(
-        `Uploaded ${((progress.loaded! / progress.total!) * 100).toFixed(
-          2
-        )}% ${sizeString}`
+        `Uploading ${key}: ${(
+          (progress.loaded! / progress.total!) *
+          100
+        ).toFixed(2)}% ${sizeString}`
       );
     });
 

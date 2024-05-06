@@ -27,7 +27,6 @@ mkdirSync(INPUT_DIR, { recursive: true });
 mkdirSync(OUTPUT_DIR, { recursive: true });
 mkdirSync(CHECKPOINT_DIR, { recursive: true });
 
-const heartbeatManager = new HeartbeatManager();
 const commandExecutor = new CommandExecutor();
 
 async function clearAllDirectories(): Promise<void> {
@@ -77,6 +76,7 @@ async function main() {
     console.log("Starting heartbeat manager...");
     const checkpointWatcher = new DirectoryWatcher(CHECKPOINT_DIR);
     const outputWatcher = new DirectoryWatcher(OUTPUT_DIR);
+    const heartbeatManager = new HeartbeatManager();
 
     heartbeatManager.startHeartbeat(
       work.id,
@@ -124,7 +124,7 @@ async function main() {
     checkpointWatcher.watchDirectory(
       async (localFilePath: string, eventType: string) => {
         const relativeFilename = path.relative(CHECKPOINT_DIR, localFilePath);
-        if (eventType === "add") {
+        if (eventType === "add" || eventType === "change") {
           await uploadFile(
             localFilePath,
             work.checkpoint_bucket,
@@ -190,7 +190,7 @@ async function main() {
     }
     await checkpointWatcher.stopWatching();
     await outputWatcher.stopWatching();
-    heartbeatManager.stopHeartbeat();
+    await heartbeatManager.stopHeartbeat();
     await clearAllDirectories();
   }
 }
