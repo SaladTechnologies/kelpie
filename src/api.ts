@@ -67,13 +67,13 @@ async function fetchUpToNTimes<T>(
       if (response.ok) {
         return response.json() as Promise<T>;
       } else {
-        log.error("Error fetching data, retrying: ", await response.text());
+        log.warn("Error fetching data, retrying: ", await response.text());
         retries++;
         await sleep(retries * 1000);
         continue;
       }
     } catch (err: any) {
-      log.error("Error fetching data, retrying: ", err.message);
+      log.warn("Error fetching data, retrying: ", err.message);
       retries++;
       await sleep(retries * 1000);
       continue;
@@ -104,6 +104,7 @@ export async function getWork(): Promise<Task | null> {
 export async function sendHeartbeat(
   jobId: string
 ): Promise<{ status: Task["status"] }> {
+  log.debug(`Sending heartbeat for job ${jobId}`);
   const { status } = await fetchUpToNTimes<{ status: Task["status"] }>(
     `${KELPIE_API_URL}/jobs/${jobId}/heartbeat`,
     {
