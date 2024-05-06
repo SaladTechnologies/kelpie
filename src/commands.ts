@@ -1,4 +1,5 @@
 import { spawn, ChildProcess } from "child_process";
+import { log } from "./logger";
 
 export class CommandExecutor {
   private process: ChildProcess | null = null;
@@ -24,12 +25,12 @@ export class CommandExecutor {
       });
 
       this.process.on("error", (err) => {
-        console.error(`Failed to start subprocess: ${err.message}`);
+        log.error(`Failed to start subprocess: ${err.message}`);
         reject(err);
       });
 
       this.process.on("exit", (code, signal) => {
-        console.log(`Process exited with code ${code}, signal ${signal}`);
+        log.info(`Process exited with code ${code}, signal ${signal}`);
         this.process = null;
         if (code !== null) {
           resolve(code);
@@ -46,9 +47,9 @@ export class CommandExecutor {
   interrupt(): void {
     if (this.process) {
       this.process.kill("SIGINT"); // Sends the interrupt signal
-      console.log("Process was interrupted");
+      log.info("Process was interrupted");
     } else {
-      console.log("No process to interrupt");
+      log.info("No process to interrupt");
     }
   }
 }

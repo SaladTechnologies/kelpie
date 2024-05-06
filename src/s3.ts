@@ -10,7 +10,8 @@ import fs from "fs";
 import { Readable } from "stream";
 import path from "path";
 import fsPromises from "fs/promises";
-const { createGzip, createGunzip } = require("node:zlib");
+import { createGzip, createGunzip } from "zlib";
+import { log } from "./logger";
 
 const { AWS_REGION, AWS_DEFAULT_REGION } = process.env;
 
@@ -46,16 +47,16 @@ export async function uploadFile(
 ): Promise<void> {
   try {
     if (ongoingUploads.has(localFilePath)) {
-      console.log(`Upload of ${localFilePath} already in progress`);
+      log.info(`Upload of ${localFilePath} already in progress`);
       return;
     }
     ongoingUploads.add(localFilePath);
-    console.log(`Uploading ${localFilePath} to s3://${bucketName}/${key}`);
+    log.info(`Uploading ${localFilePath} to s3://${bucketName}/${key}`);
     // Create a stream from the local file
     const fileStream = fs.createReadStream(localFilePath);
     let stream;
     if (compress) {
-      console.log(`Compressing ${localFilePath} file with gzip`);
+      log.info(`Compressing ${localFilePath} file with gzip`);
       const gzipStream = createGzip();
       fileStream.pipe(gzipStream);
       stream = gzipStream;
@@ -82,7 +83,10 @@ export async function uploadFile(
     // Track progress
     parallelUploads3.on("httpUploadProgress", (progress: Progress) => {
       let sizeString = getDataRatioString(progress.loaded!, progress.total!);
-      console.log(
+      if (!sizeString) {
+        log.warn({ progress }, "Progress data ratio string is empty");
+      }
+      log.info(
         `Uploading ${key}: ${(
           (progress.loaded! / progress.total!) *
           100
@@ -92,10 +96,10 @@ export async function uploadFile(
 
     // Wait for the upload to finish
     await parallelUploads3.done();
-    console.log("Upload completed successfully");
+    log.info("Upload completed successfully");
     ongoingUploads.delete(localFilePath);
   } catch (err) {
-    console.error("Error uploading file: ", err);
+    log.error("Error uploading file: ", err);
   }
 }
 
@@ -123,9 +127,9 @@ export async function downloadFile(
 
     return new Promise((resolve, reject) => {
       if (data.Body instanceof Readable) {
-        let stream = data.Body;
+        let stream: Readable = data.Body;
         if (isGzipped) {
-          console.log(`Decompressing ${key} file with gunzip`);
+          log.info(`Decompressing ${key} file with gunzip`);
           stream = stream.pipe(createGunzip());
         }
 
@@ -147,13 +151,13 @@ export async function downloadFile(
             } else {
               durString = `${(durMs / 60000).toFixed(2)}m`;
             }
-            console.log(`${localFilePath} downloaded in ${durString}`);
+            log.info(`${localFilePath} downloaded in ${durString}`);
             resolve();
           });
       }
     });
   } catch (err: any) {
-    console.error("Error downloading file: ", err);
+    log.error("Error downloading file: ", err);
     throw err;
   }
 }
@@ -209,7 +213,7 @@ async function processBatch(
   const results = await Promise.allSettled(downloadPromises);
   results.forEach((result, index) => {
     if (result.status === "rejected") {
-      console.error(`Download failed for ${batch[index]}: ${result.reason}`);
+      log.error(`Download failed for ${batch[index]}: ${result.reason}`);
     }
   });
 }
@@ -222,11 +226,11 @@ export async function downloadAllFilesFromPrefix(
   decompress: boolean = false
 ): Promise<void> {
   try {
-    console.log(
+    log.info(
       `Downloading all files with prefix ${prefix} from storage bucket: ${bucket}`
     );
     const allKeys = await listAllS3Objects(bucket, prefix);
-    console.log(`Found ${allKeys.length} files to download`);
+    log.info(`Found ${allKeys.length} files to download`);
 
     // Download files in batches
     for (let i = 0; i < allKeys.length; i += batchSize) {
@@ -234,11 +238,11 @@ export async function downloadAllFilesFromPrefix(
       await processBatch(batch, bucket, prefix, outputDir, decompress);
     }
 
-    console.log(
+    log.info(
       `All files from s3://${bucket}/${prefix} downloaded to ${outputDir} successfully`
     );
   } catch (err) {
-    console.error("Error downloading files: ", err);
+    log.error("Error downloading files: ", err);
   }
 }
 
@@ -250,11 +254,9 @@ export async function uploadDirectory(
   compress: boolean = false
 ): Promise<void> {
   try {
-    console.log(
-      `Uploading directory ${directory} to storage bucket: ${bucket}`
-    );
+    log.info(`Uploading directory ${directory} to storage bucket: ${bucket}`);
     const fileList = await getAllFilePaths(directory);
-    console.log(`Found ${fileList.length} files to upload`);
+    log.info(`Found ${fileList.length} files to upload`);
     for (let i = 0; i < fileList.length; i += batchSize) {
       const batch = fileList.slice(i, i + batchSize);
       await Promise.all(
@@ -265,9 +267,9 @@ export async function uploadDirectory(
         })
       );
     }
-    console.log("Directory uploaded successfully");
+    log.info("Directory uploaded successfully");
   } catch (err) {
-    console.error("Error uploading directory: ", err);
+    log.error("Error uploading directory: ", err);
   }
 }
 
@@ -294,14 +296,14 @@ async function getAllFilePaths(dir: string): Promise<string[]> {
 
 export async function deleteFile(bucket: string, key: string): Promise<void> {
   try {
-    console.log(`Deleting file s3://${bucket}/${key}`);
+    log.info(`Deleting file s3://${bucket}/${key}`);
     const params = {
       Bucket: bucket,
       Key: key,
     };
     await s3Client.send(new DeleteObjectCommand(params));
-    console.log("File deleted successfully");
+    log.info("File deleted successfully");
   } catch (err) {
-    console.error("Error deleting file: ", err);
+    log.error("Error deleting file: ", err);
   }
 }

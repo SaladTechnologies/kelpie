@@ -1,4 +1,5 @@
 import assert from "assert";
+import { log } from "./logger";
 
 let {
   KELPIE_API_URL,
@@ -66,13 +67,13 @@ async function fetchUpToNTimes<T>(
       if (response.ok) {
         return response.json() as Promise<T>;
       } else {
-        console.error("Error fetching data, retrying: ", await response.text());
+        log.error("Error fetching data, retrying: ", await response.text());
         retries++;
         await sleep(retries * 1000);
         continue;
       }
     } catch (err: any) {
-      console.error("Error fetching data, retrying: ", err.message);
+      log.error("Error fetching data, retrying: ", err.message);
       retries++;
       await sleep(retries * 1000);
       continue;
@@ -119,7 +120,7 @@ export async function sendHeartbeat(
 }
 
 export async function reportFailed(jobId: string): Promise<void> {
-  console.log(`Reporting job ${jobId} as failed`);
+  log.info(`Reporting job ${jobId} as failed`);
   await fetchUpToNTimes(
     `${KELPIE_API_URL}/jobs/${jobId}/failed`,
     {
@@ -135,7 +136,7 @@ export async function reportFailed(jobId: string): Promise<void> {
 }
 
 export async function reportCompleted(jobId: string): Promise<void> {
-  console.log(`Reporting job ${jobId} as completed`);
+  log.info(`Reporting job ${jobId} as completed`);
   await fetchUpToNTimes(
     `${KELPIE_API_URL}/jobs/${jobId}/completed`,
     {
@@ -163,12 +164,12 @@ export class HeartbeatManager {
   ): Promise<void> {
     this.active = true; // Set the loop to be active
     this.jobId = jobId;
-    console.log("Heartbeat started.");
+    log.info("Heartbeat started.");
 
     while (this.active) {
       const { status } = await sendHeartbeat(jobId); // Call your sendHeartbeat function
       if (status === "canceled") {
-        console.log(`Job ${this.jobId} was canceled, stopping heartbeat.`);
+        log.info(`Job ${this.jobId} was canceled, stopping heartbeat.`);
         await onCanceled();
         break;
       }
@@ -176,12 +177,12 @@ export class HeartbeatManager {
       await this.waiter; // Wait for 30 seconds before the next heartbeat
     }
 
-    console.log(`Heartbeat stopped fir job ${this.jobId}`);
+    log.info(`Heartbeat stopped fir job ${this.jobId}`);
   }
 
   // Stops the heartbeat loop
   async stopHeartbeat(): Promise<void> {
-    console.log(`Stopping heartbeat for job ${this.jobId}`);
+    log.info(`Stopping heartbeat for job ${this.jobId}`);
     this.active = false; // Set the loop to be inactive
     if (this.waiter) {
       await this.waiter; // Wait for the last heartbeat to complete

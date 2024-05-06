@@ -3,6 +3,7 @@ import { join } from "path";
 import fsPromises from "fs/promises";
 import { Stats } from "fs";
 import fs from "fs";
+import { log } from "./logger";
 
 // Function to check if the file has stopped changing
 function waitForFileStability(filePath: string): Promise<void> {
@@ -50,14 +51,14 @@ export class DirectoryWatcher {
   watchDirectory(
     forEachFile: (localFilePath: string, eventType: string) => Promise<void>
   ): void {
-    console.log(`Watching directory: ${this.directory}`);
+    log.info(`Watching directory: ${this.directory}`);
     this.watcher = chokidar.watch(this.directory, {
       ignored: /^\./,
       persistent: true,
     });
 
     this.watcher.on("add", async (path: string, stats?: Stats) => {
-      console.log(`Event: add on ${path}`);
+      log.info(`Event: add on ${path}`);
       const task = waitForFileStability(path)
         .then(() => forEachFile(path, "add"))
         .finally(() => {
@@ -67,7 +68,7 @@ export class DirectoryWatcher {
     });
 
     this.watcher.on("change", async (path: string, stats?: Stats) => {
-      console.log(`Event: change on ${path}`);
+      log.info(`Event: change on ${path}`);
       const task = waitForFileStability(path)
         .then(() => forEachFile(path, "change"))
         .finally(() => {
@@ -77,7 +78,7 @@ export class DirectoryWatcher {
     });
 
     this.watcher.on("unlink", async (path: string) => {
-      console.log(`Event: unlink on ${path}`);
+      log.info(`Event: unlink on ${path}`);
       const task = forEachFile(path, "unlink").finally(() => {
         this.activeTasks.delete(task);
       });
@@ -88,12 +89,12 @@ export class DirectoryWatcher {
   // Stop watching the directory
   async stopWatching(): Promise<void> {
     if (this.watcher) {
-      console.log(`Stopping directory watcher: ${this.directory}`);
+      log.info(`Stopping directory watcher: ${this.directory}`);
       await Promise.all(this.activeTasks); // Wait for all tasks to complete
-      console.log("All tasks completed.");
+      log.info("All tasks completed.");
       this.watcher.close(); // Close the watcher to free up resources
       this.watcher = null;
-      console.log("Stopped watching directory.");
+      log.info("Stopped watching directory.");
     }
   }
 }
@@ -102,24 +103,24 @@ export async function recursivelyClearFilesInDirectory(
   directory: string
 ): Promise<void> {
   try {
-    console.log(`Clearing files in directory: ${directory}`);
+    log.info(`Clearing files in directory: ${directory}`);
     const files = await fsPromises.readdir(directory);
     await Promise.all(
       files.map(async (file) => {
         const filePath = join(directory, file);
         const stats = await fsPromises.stat(filePath);
         if (stats.isFile()) {
-          console.log(`Removing file: ${filePath}`);
+          log.info(`Removing file: ${filePath}`);
           await fsPromises.unlink(filePath);
         } else if (stats.isDirectory()) {
           await recursivelyClearFilesInDirectory(filePath);
-          console.log(`Removing directory: ${filePath}`);
+          log.info(`Removing directory: ${filePath}`);
           await fsPromises.rmdir(filePath);
         }
       })
     );
-    console.log("Directory cleared successfully");
+    log.info("Directory cleared successfully");
   } catch (err) {
-    console.error("Error clearing directory: ", err);
+    log.error("Error clearing directory: ", err);
   }
 }

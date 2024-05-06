@@ -17,6 +17,7 @@ import { CommandExecutor } from "./commands";
 import path from "path";
 import { version } from "../package.json";
 import fs from "fs/promises";
+import { log } from "./logger";
 
 const {
   INPUT_DIR = "/input",
@@ -43,18 +44,18 @@ async function sleep(ms: number): Promise<void> {
 
 let keepAlive = true;
 process.on("SIGINT", () => {
-  console.log("Received SIGINT, stopping...");
+  log.info("Received SIGINT, stopping...");
   keepAlive = false;
 });
 
 process.on("SIGTERM", () => {
   keepAlive = false;
-  console.log("Received SIGTERM, stopping...");
+  log.info("Received SIGTERM, stopping...");
   process.exit();
 });
 
 async function main() {
-  console.log(`Kelpie v${version} started`);
+  log.info(`Kelpie v${version} started`);
   await clearAllDirectories();
 
   while (keepAlive) {
@@ -62,19 +63,19 @@ async function main() {
     try {
       work = await getWork();
     } catch (e: any) {
-      console.error("Error fetching work: ", e);
+      log.error("Error fetching work: ", e);
       await sleep(10000);
       continue;
     }
 
     if (!work) {
-      console.log("No work available, sleeping for 10 seconds...");
+      log.info("No work available, sleeping for 10 seconds...");
       await sleep(10000);
       continue;
     }
-    console.log(`Received work: ${work.id}`);
+    log.info(`Received work: ${work.id}`);
 
-    console.log("Starting heartbeat manager...");
+    log.info("Starting heartbeat manager...");
     const checkpointWatcher = new DirectoryWatcher(CHECKPOINT_DIR);
     const outputWatcher = new DirectoryWatcher(OUTPUT_DIR);
     const heartbeatManager = new HeartbeatManager();
@@ -99,7 +100,7 @@ async function main() {
         !!work.compression
       );
     } catch (e: any) {
-      console.error("Error downloading input files: ", e);
+      log.error("Error downloading input files: ", e);
       // await reportFailed(work.id);
       continue;
     }
@@ -113,12 +114,12 @@ async function main() {
         !!work.compression
       );
     } catch (e: any) {
-      console.error("Error downloading checkpoint files: ", e);
+      log.error("Error downloading checkpoint files: ", e);
       // await reportFailed(work.id);
       continue;
     }
 
-    console.log(
+    log.info(
       "All files downloaded successfully, starting directory watchers..."
     );
 
@@ -167,7 +168,7 @@ async function main() {
       await outputWatcher.stopWatching();
 
       if (exitCode === 0) {
-        console.log(`Work completed successfully on job ${work.id}`);
+        log.info(`Work completed successfully on job ${work.id}`);
         await sleep(1000); // Sleep for a second to ensure the output files are written
         // Move the output directory to a separate location and upload it asynchronously
         const newDir = `/output-${work.id}`;
@@ -182,28 +183,24 @@ async function main() {
         )
           .then(() => reportCompleted(work.id))
           .catch(() => {
-            console.error(
-              "Error uploading output directory and completing job"
-            );
+            log.error("Error uploading output directory and completing job");
             reportFailed(work.id);
           })
           .finally(() => {
-            console.log(
+            log.info(
               `Output directory uploaded and job completed. Removing ${newDir}...`
             );
             fs.rmdir(newDir, { recursive: true });
           });
       } else {
         await reportFailed(work.id);
-        console.error(
-          `Work failed with exit code ${exitCode} on job ${work.id}`
-        );
+        log.error(`Work failed with exit code ${exitCode} on job ${work.id}`);
       }
     } catch (e: any) {
       if (/terminated due to signal/i.test(e.message)) {
-        console.log("Work was interrupted, likely due to remote cancellation");
+        log.info("Work was interrupted, likely due to remote cancellation");
       } else {
-        console.error("Error processing work: ", e);
+        log.error("Error processing work: ", e);
         await reportFailed(work.id);
       }
     }
@@ -214,4 +211,4 @@ async function main() {
   }
 }
 
-main().then(() => console.log("Kelpie Exiting"));
+main().then(() => log.info("Kelpie Exiting"));
