@@ -58,7 +58,7 @@ export class DirectoryWatcher {
     });
 
     this.watcher.on("add", async (path: string, stats?: Stats) => {
-      log.info(`Event: add on ${path}`);
+      log.debug(`Event: add on ${path}`);
       const task = waitForFileStability(path)
         .then(() => forEachFile(path, "add"))
         .finally(() => {

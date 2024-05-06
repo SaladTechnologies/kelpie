@@ -17,8 +17,11 @@ const { AWS_REGION, AWS_DEFAULT_REGION } = process.env;
 
 const s3Client = new S3Client({ region: AWS_REGION || AWS_DEFAULT_REGION });
 
-function getDataRatioString(loaded: number, total: number): string {
-  let sizeString = "";
+function getDataRatioString(
+  loaded: number | undefined,
+  total: number | undefined
+): string {
+  let sizeString = "(??? B)";
   if (loaded && total && total > 1024 * 1024 * 1024) {
     const totalGB = (total / (1024 * 1024 * 1024)).toFixed(2);
     const progressGB = (loaded / (1024 * 1024 * 1024)).toFixed(2);
@@ -33,6 +36,17 @@ function getDataRatioString(loaded: number, total: number): string {
     sizeString = `(${progressKB}/${totalKB} KB)`;
   } else if (loaded && total) {
     sizeString = `(${loaded}/${total} B)`;
+  } else if (loaded && loaded > 1024 * 1024 * 1024) {
+    const progressGB = (loaded / (1024 * 1024 * 1024)).toFixed(2);
+    sizeString = `(${progressGB} GB)`;
+  } else if (loaded && loaded > 1024 * 1024) {
+    const progressMB = (loaded / (1024 * 1024)).toFixed(2);
+    sizeString = `(${progressMB} MB)`;
+  } else if (loaded && loaded > 1024) {
+    const progressKB = (loaded / 1024).toFixed(2);
+    sizeString = `(${progressKB} KB)`;
+  } else if (loaded) {
+    sizeString = `(${loaded} B)`;
   }
   return sizeString;
 }
@@ -82,25 +96,25 @@ export async function uploadFile(
 
     // Track progress
     parallelUploads3.on("httpUploadProgress", (progress: Progress) => {
-      let sizeString = getDataRatioString(progress.loaded!, progress.total!);
+      let sizeString = getDataRatioString(progress.loaded, progress.total);
       if (!sizeString) {
         log.warn({ progress }, "Progress data ratio string is empty");
       }
-      log.info(
-        `Uploading ${key}: ${(
-          (progress.loaded! / progress.total!) *
-          100
-        ).toFixed(2)}% ${sizeString}`
-      );
+      let loadRatio = progress.loaded! / progress.total!;
+      let percentString = "Calculating Total...";
+      if (!isNaN(loadRatio)) {
+        percentString = (loadRatio * 100).toFixed(2) + "%";
+      }
+      log.info(`Uploading ${key}: ${percentString} ${sizeString}`);
     });
 
     // Wait for the upload to finish
     await parallelUploads3.done();
     log.info("Upload completed successfully");
-    ongoingUploads.delete(localFilePath);
   } catch (err) {
     log.error("Error uploading file: ", err);
   }
+  ongoingUploads.delete(localFilePath);
 }
 
 export async function downloadFile(
