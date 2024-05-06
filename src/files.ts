@@ -68,7 +68,7 @@ export class DirectoryWatcher {
     });
 
     this.watcher.on("change", async (path: string, stats?: Stats) => {
-      log.info(`Event: change on ${path}`);
+      log.debug(`Event: change on ${path}`);
       const task = waitForFileStability(path)
         .then(() => forEachFile(path, "change"))
         .finally(() => {
@@ -78,7 +78,7 @@ export class DirectoryWatcher {
     });
 
     this.watcher.on("unlink", async (path: string) => {
-      log.info(`Event: unlink on ${path}`);
+      log.debug(`Event: unlink on ${path}`);
       const task = forEachFile(path, "unlink").finally(() => {
         this.activeTasks.delete(task);
       });
@@ -110,11 +110,11 @@ export async function recursivelyClearFilesInDirectory(
         const filePath = join(directory, file);
         const stats = await fsPromises.stat(filePath);
         if (stats.isFile()) {
-          log.info(`Removing file: ${filePath}`);
+          log.debug(`Removing file: ${filePath}`);
           await fsPromises.unlink(filePath);
         } else if (stats.isDirectory()) {
           await recursivelyClearFilesInDirectory(filePath);
-          log.info(`Removing directory: ${filePath}`);
+          log.debug(`Removing directory: ${filePath}`);
           await fsPromises.rmdir(filePath);
         }
       })
