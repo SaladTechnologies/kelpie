@@ -178,7 +178,7 @@ export class HeartbeatManager {
       await this.waiter; // Wait for 30 seconds before the next heartbeat
     }
 
-    log.info(`Heartbeat stopped fir job ${this.jobId}`);
+    log.info(`Heartbeat stopped for job ${this.jobId}`);
   }
 
   // Stops the heartbeat loop
