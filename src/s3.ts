@@ -8,69 +8,78 @@ import {
 import { Progress, Upload } from "@aws-sdk/lib-storage";
 import fs from "fs";
 import { Readable } from "stream";
-
 import path from "path";
 import fsPromises from "fs/promises";
+const { createGzip, createGunzip } = require("node:zlib");
 
 const { AWS_REGION, AWS_DEFAULT_REGION } = process.env;
 
 const s3Client = new S3Client({ region: AWS_REGION || AWS_DEFAULT_REGION });
 
+function getDataRatioString(loaded: number, total: number): string {
+  let sizeString = "";
+  if (loaded && total && total > 1024 * 1024 * 1024) {
+    const totalGB = (total / (1024 * 1024 * 1024)).toFixed(2);
+    const progressGB = (loaded / (1024 * 1024 * 1024)).toFixed(2);
+    sizeString = `(${progressGB}/${totalGB} GB)`;
+  } else if (loaded && total && total > 1024 * 1024) {
+    const totalMB = (total / (1024 * 1024)).toFixed(2);
+    const progressMB = (loaded / (1024 * 1024)).toFixed(2);
+    sizeString = `(${progressMB}/${totalMB} MB)`;
+  } else if (loaded && total && total > 1024) {
+    const totalKB = (total / 1024).toFixed(2);
+    const progressKB = (loaded / 1024).toFixed(2);
+    sizeString = `(${progressKB}/${totalKB} KB)`;
+  } else if (loaded && total) {
+    sizeString = `(${loaded}/${total} B)`;
+  }
+  return sizeString;
+}
+
 export async function uploadFile(
   localFilePath: string,
   bucketName: string,
-  key: string
+  key: string,
+  compress: boolean = false
 ): Promise<void> {
   try {
     console.log(`Uploading ${localFilePath} to s3://${bucketName}/${key}`);
     // Create a stream from the local file
     const fileStream = fs.createReadStream(localFilePath);
+    let stream;
+    if (compress) {
+      console.log(`Compressing ${localFilePath} file with gzip`);
+      const gzipStream = createGzip();
+      fileStream.pipe(gzipStream);
+      stream = gzipStream;
+      key = key + ".gz";
+    } else {
+      stream = fileStream;
+    }
 
     // Set up the upload parameters
     const uploadParams = {
       Bucket: bucketName,
       Key: key,
-      Body: fileStream,
+      Body: stream,
     };
 
     // Perform the upload
     const parallelUploads3 = new Upload({
       client: s3Client,
       params: uploadParams,
-      queueSize: 4,
-      partSize: 5 * 1024 * 1024,
+      queueSize: 8,
+      partSize: 10 * 1024 * 1024,
     });
 
     // Track progress
     parallelUploads3.on("httpUploadProgress", (progress: Progress) => {
-      let sizeString = "";
-      if (
-        progress.loaded &&
-        progress.total &&
-        progress.total > 1024 * 1024 * 1024
-      ) {
-        const totalGB = (progress.total / (1024 * 1024 * 1024)).toFixed(2);
-        const progressGB = (progress.loaded / (1024 * 1024 * 1024)).toFixed(2);
-        sizeString = `(${progressGB}/${totalGB} GB)`;
-      } else if (
-        progress.loaded &&
-        progress.total &&
-        progress.total > 1024 * 1024
-      ) {
-        const totalMB = (progress.total / (1024 * 1024)).toFixed(2);
-        const progressMB = (progress.loaded / (1024 * 1024)).toFixed(2);
-        sizeString = `(${progressMB}/${totalMB} MB)`;
-      } else if (progress.loaded && progress.total && progress.total > 1024) {
-        const totalKB = (progress.total / 1024).toFixed(2);
-        const progressKB = (progress.loaded / 1024).toFixed(2);
-        sizeString = `(${progressKB}/${totalKB} KB)`;
-      } else if (progress.loaded && progress.total) {
-        sizeString = `(${progress.loaded}/${progress.total} B)`;
-      }
+      let sizeString = getDataRatioString(progress.loaded!, progress.total!);
       console.log(
-        `Uploaded ${((progress.loaded! / progress.total!) * 100).toFixed(
-          2
-        )}% ${sizeString}`
+        `Uploading ${key}: ${(
+          (progress.loaded! / progress.total!) *
+          100
+        ).toFixed(2)}% ${sizeString}`
       );
     });
 
@@ -85,10 +94,16 @@ export async function uploadFile(
 export async function downloadFile(
   bucketName: string,
   key: string,
-  localFilePath: string
+  localFilePath: string,
+  decompress: boolean = false
 ): Promise<void> {
   try {
     const start = Date.now();
+
+    const isGzipped = decompress && key.endsWith(".gz");
+    if (isGzipped) {
+      localFilePath = localFilePath.replace(/\.gz$/, "");
+    }
     // Set up the download parameters
     const downloadParams = {
       Bucket: bucketName,
@@ -100,9 +115,16 @@ export async function downloadFile(
 
     return new Promise((resolve, reject) => {
       if (data.Body instanceof Readable) {
+        let stream = data.Body;
+        if (isGzipped) {
+          console.log(`Decompressing ${key} file with gunzip`);
+          stream = stream.pipe(createGunzip());
+        }
+
         // Loop through body chunks and write to file
         const writeStream = fs.createWriteStream(localFilePath);
-        data.Body.pipe(writeStream)
+        stream
+          .pipe(writeStream)
           .on("error", (err: any) => reject(err))
           .on("close", () => {
             const end = Date.now();
@@ -165,14 +187,15 @@ async function processBatch(
   batch: string[],
   bucket: string,
   prefix: string,
-  outputDir: string
+  outputDir: string,
+  decompress: boolean = false
 ) {
   const downloadPromises = batch.map(async (key) => {
     const filename = key.replace(prefix, "");
     const localFilePath = path.join(outputDir, filename);
     const dir = path.dirname(localFilePath);
     await fsPromises.mkdir(dir, { recursive: true });
-    return downloadFile(bucket, key, localFilePath);
+    return downloadFile(bucket, key, localFilePath, decompress);
   });
 
   const results = await Promise.allSettled(downloadPromises);
@@ -187,7 +210,8 @@ export async function downloadAllFilesFromPrefix(
   bucket: string,
   prefix: string,
   outputDir: string,
-  batchSize: number = 10
+  batchSize: number = 10,
+  decompress: boolean = false
 ): Promise<void> {
   try {
     console.log(
@@ -199,7 +223,7 @@ export async function downloadAllFilesFromPrefix(
     // Download files in batches
     for (let i = 0; i < allKeys.length; i += batchSize) {
       const batch = allKeys.slice(i, i + batchSize);
-      await processBatch(batch, bucket, prefix, outputDir);
+      await processBatch(batch, bucket, prefix, outputDir, decompress);
     }
 
     console.log(
@@ -214,7 +238,8 @@ export async function uploadDirectory(
   directory: string,
   bucket: string,
   prefix: string,
-  batchSize: number = 10
+  batchSize: number = 10,
+  compress: boolean = false
 ): Promise<void> {
   try {
     console.log(
@@ -228,7 +253,7 @@ export async function uploadDirectory(
         batch.map(async (filePath) => {
           const localFilePath = path.join(directory, filePath);
           const key = prefix + filePath;
-          return await uploadFile(localFilePath, bucket, key);
+          return await uploadFile(localFilePath, bucket, key, compress);
         })
       );
     }

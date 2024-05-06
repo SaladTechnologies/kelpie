@@ -27,7 +27,6 @@ mkdirSync(INPUT_DIR, { recursive: true });
 mkdirSync(OUTPUT_DIR, { recursive: true });
 mkdirSync(CHECKPOINT_DIR, { recursive: true });
 
-const heartbeatManager = new HeartbeatManager();
 const commandExecutor = new CommandExecutor();
 
 async function clearAllDirectories(): Promise<void> {
@@ -77,6 +76,7 @@ async function main() {
     console.log("Starting heartbeat manager...");
     const checkpointWatcher = new DirectoryWatcher(CHECKPOINT_DIR);
     const outputWatcher = new DirectoryWatcher(OUTPUT_DIR);
+    const heartbeatManager = new HeartbeatManager();
 
     heartbeatManager.startHeartbeat(
       work.id,
@@ -94,7 +94,8 @@ async function main() {
         work.input_bucket,
         work.input_prefix,
         INPUT_DIR,
-        20
+        20,
+        !!work.compression
       );
     } catch (e: any) {
       console.error("Error downloading input files: ", e);
@@ -107,7 +108,8 @@ async function main() {
         work.checkpoint_bucket,
         work.checkpoint_prefix,
         CHECKPOINT_DIR,
-        20
+        20,
+        !!work.compression
       );
     } catch (e: any) {
       console.error("Error downloading checkpoint files: ", e);
@@ -122,11 +124,12 @@ async function main() {
     checkpointWatcher.watchDirectory(
       async (localFilePath: string, eventType: string) => {
         const relativeFilename = path.relative(CHECKPOINT_DIR, localFilePath);
-        if (eventType === "add") {
+        if (eventType === "add" || eventType === "change") {
           await uploadFile(
             localFilePath,
             work.checkpoint_bucket,
-            work.checkpoint_prefix + relativeFilename
+            work.checkpoint_prefix + relativeFilename,
+            !!work.compression
           );
         } else if (eventType === "unlink") {
           await deleteFile(
@@ -145,7 +148,8 @@ async function main() {
             await uploadFile(
               localFilePath,
               work.output_bucket,
-              work.output_prefix + relativeFilename
+              work.output_prefix + relativeFilename,
+              !!work.compression
             );
           }
         }
@@ -166,7 +170,8 @@ async function main() {
           OUTPUT_DIR,
           work.output_bucket,
           work.output_prefix,
-          5
+          5,
+          !!work.compression
         );
         await reportCompleted(work.id);
       } else {
@@ -185,7 +190,7 @@ async function main() {
     }
     await checkpointWatcher.stopWatching();
     await outputWatcher.stopWatching();
-    heartbeatManager.stopHeartbeat();
+    await heartbeatManager.stopHeartbeat();
     await clearAllDirectories();
   }
 }

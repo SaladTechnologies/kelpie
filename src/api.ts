@@ -47,6 +47,7 @@ interface Task {
   max_failures: number;
   webhook?: string;
   container_group_id: string;
+  compression?: boolean;
 }
 
 async function sleep(ms: number): Promise<void> {
@@ -77,7 +78,7 @@ async function fetchUpToNTimes<T>(
       continue;
     }
   }
-  throw new Error("Failed to fetch data");
+  throw new Error(`Failed to fetch data: ${url}`);
 }
 
 export async function getWork(): Promise<Task | null> {
@@ -151,6 +152,8 @@ export async function reportCompleted(jobId: string): Promise<void> {
 
 export class HeartbeatManager {
   private active: boolean = false;
+  private jobId: string = "";
+  private waiter: Promise<void> | null = null;
 
   // Starts the heartbeat loop
   async startHeartbeat(
@@ -159,23 +162,30 @@ export class HeartbeatManager {
     onCanceled: () => Promise<void>
   ): Promise<void> {
     this.active = true; // Set the loop to be active
+    this.jobId = jobId;
     console.log("Heartbeat started.");
 
     while (this.active) {
       const { status } = await sendHeartbeat(jobId); // Call your sendHeartbeat function
       if (status === "canceled") {
-        console.log("Job was canceled, stopping heartbeat.");
+        console.log(`Job ${this.jobId} was canceled, stopping heartbeat.`);
         await onCanceled();
         break;
       }
-      await sleep(interval_s * 1000); // Wait for 30 seconds before the next heartbeat
+      this.waiter = sleep(interval_s * 1000);
+      await this.waiter; // Wait for 30 seconds before the next heartbeat
     }
 
-    console.log("Heartbeat stopped.");
+    console.log(`Heartbeat stopped fir job ${this.jobId}`);
   }
 
   // Stops the heartbeat loop
-  stopHeartbeat(): void {
+  async stopHeartbeat(): Promise<void> {
+    console.log(`Stopping heartbeat for job ${this.jobId}`);
     this.active = false; // Set the loop to be inactive
+    if (this.waiter) {
+      await this.waiter; // Wait for the last heartbeat to complete
+      this.waiter = null;
+    }
   }
 }
