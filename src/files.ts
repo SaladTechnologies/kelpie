@@ -88,6 +88,7 @@ export class DirectoryWatcher {
   // Stop watching the directory
   async stopWatching(): Promise<void> {
     if (this.watcher) {
+      console.log(`Stopping directory watcher: ${this.directory}`);
       await Promise.all(this.activeTasks); // Wait for all tasks to complete
       console.log("All tasks completed.");
       this.watcher.close(); // Close the watcher to free up resources

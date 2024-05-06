@@ -36,6 +36,8 @@ function getDataRatioString(loaded: number, total: number): string {
   return sizeString;
 }
 
+const ongoingUploads: Set<string> = new Set();
+
 export async function uploadFile(
   localFilePath: string,
   bucketName: string,
@@ -43,6 +45,11 @@ export async function uploadFile(
   compress: boolean = false
 ): Promise<void> {
   try {
+    if (ongoingUploads.has(localFilePath)) {
+      console.log(`Upload of ${localFilePath} already in progress`);
+      return;
+    }
+    ongoingUploads.add(localFilePath);
     console.log(`Uploading ${localFilePath} to s3://${bucketName}/${key}`);
     // Create a stream from the local file
     const fileStream = fs.createReadStream(localFilePath);
@@ -86,6 +93,7 @@ export async function uploadFile(
     // Wait for the upload to finish
     await parallelUploads3.done();
     console.log("Upload completed successfully");
+    ongoingUploads.delete(localFilePath);
   } catch (err) {
     console.error("Error uploading file: ", err);
   }

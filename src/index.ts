@@ -16,6 +16,7 @@ import {
 import { CommandExecutor } from "./commands";
 import path from "path";
 import { version } from "../package.json";
+import fs from "fs/promises";
 
 const {
   INPUT_DIR = "/input",
@@ -162,18 +163,36 @@ async function main() {
         work.arguments,
         { ...work.environment, INPUT_DIR, OUTPUT_DIR, CHECKPOINT_DIR }
       );
+      await checkpointWatcher.stopWatching();
+      await outputWatcher.stopWatching();
 
       if (exitCode === 0) {
         console.log(`Work completed successfully on job ${work.id}`);
         await sleep(1000); // Sleep for a second to ensure the output files are written
-        await uploadDirectory(
-          OUTPUT_DIR,
+        // Move the output directory to a separate location and upload it asynchronously
+        const newDir = `/output-${work.id}`;
+        await fs.rename(OUTPUT_DIR, newDir);
+        await fs.mkdir(OUTPUT_DIR, { recursive: true });
+        uploadDirectory(
+          newDir,
           work.output_bucket,
           work.output_prefix,
-          5,
+          2,
           !!work.compression
-        );
-        await reportCompleted(work.id);
+        )
+          .then(() => reportCompleted(work.id))
+          .catch(() => {
+            console.error(
+              "Error uploading output directory and completing job"
+            );
+            reportFailed(work.id);
+          })
+          .finally(() => {
+            console.log(
+              `Output directory uploaded and job completed. Removing ${newDir}...`
+            );
+            fs.rmdir(newDir, { recursive: true });
+          });
       } else {
         await reportFailed(work.id);
         console.error(
