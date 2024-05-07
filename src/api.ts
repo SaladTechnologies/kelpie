@@ -1,4 +1,6 @@
 import assert from "assert";
+import { log as baseLogger } from "./logger";
+import { Logger } from "pino";
 
 let {
   KELPIE_API_URL,
@@ -22,7 +24,7 @@ const headers = {
   "X-Kelpie-Key": KELPIE_API_KEY,
 };
 
-interface Task {
+export interface Task {
   id: string;
   user_id: string;
   status: "pending" | "running" | "completed" | "canceled" | "failed";
@@ -57,7 +59,8 @@ async function sleep(ms: number): Promise<void> {
 async function fetchUpToNTimes<T>(
   url: string,
   params: any,
-  n: number
+  n: number,
+  log: Logger = baseLogger
 ): Promise<T> {
   let retries = 0;
   while (retries < n) {
@@ -66,13 +69,13 @@ async function fetchUpToNTimes<T>(
       if (response.ok) {
         return response.json() as Promise<T>;
       } else {
-        console.error("Error fetching data, retrying: ", await response.text());
+        log.warn("Error fetching data, retrying: ", await response.text());
         retries++;
         await sleep(retries * 1000);
         continue;
       }
     } catch (err: any) {
-      console.error("Error fetching data, retrying: ", err.message);
+      log.warn("Error fetching data, retrying: ", err.message);
       retries++;
       await sleep(retries * 1000);
       continue;
@@ -101,8 +104,10 @@ export async function getWork(): Promise<Task | null> {
 }
 
 export async function sendHeartbeat(
-  jobId: string
+  jobId: string,
+  log: Logger
 ): Promise<{ status: Task["status"] }> {
+  log.debug(`Sending heartbeat`);
   const { status } = await fetchUpToNTimes<{ status: Task["status"] }>(
     `${KELPIE_API_URL}/jobs/${jobId}/heartbeat`,
     {
@@ -113,13 +118,14 @@ export async function sendHeartbeat(
         container_group_id: SALAD_CONTAINER_GROUP_ID,
       }),
     },
-    maxRetries
+    maxRetries,
+    log
   );
   return { status };
 }
 
-export async function reportFailed(jobId: string): Promise<void> {
-  console.log(`Reporting job ${jobId} as failed`);
+export async function reportFailed(jobId: string, log: Logger): Promise<void> {
+  log.info(`Reporting job failed`);
   await fetchUpToNTimes(
     `${KELPIE_API_URL}/jobs/${jobId}/failed`,
     {
@@ -130,12 +136,16 @@ export async function reportFailed(jobId: string): Promise<void> {
         container_group_id: SALAD_CONTAINER_GROUP_ID,
       }),
     },
-    maxRetries
+    maxRetries,
+    log
   );
 }
 
-export async function reportCompleted(jobId: string): Promise<void> {
-  console.log(`Reporting job ${jobId} as completed`);
+export async function reportCompleted(
+  jobId: string,
+  log: Logger
+): Promise<void> {
+  log.info("Reporting job completed");
   await fetchUpToNTimes(
     `${KELPIE_API_URL}/jobs/${jobId}/completed`,
     {
@@ -146,29 +156,34 @@ export async function reportCompleted(jobId: string): Promise<void> {
         container_group_id: SALAD_CONTAINER_GROUP_ID,
       }),
     },
-    maxRetries
+    maxRetries,
+    log
   );
 }
 
 export class HeartbeatManager {
   private active: boolean = false;
-  private jobId: string = "";
+  private jobId: string;
   private waiter: Promise<void> | null = null;
+  private log: Logger;
+
+  constructor(jobId: string, log: Logger) {
+    this.log = log;
+    this.jobId = jobId;
+  }
 
   // Starts the heartbeat loop
   async startHeartbeat(
-    jobId: string,
     interval_s: number = 30,
     onCanceled: () => Promise<void>
   ): Promise<void> {
     this.active = true; // Set the loop to be active
-    this.jobId = jobId;
-    console.log("Heartbeat started.");
+    this.log.info("Heartbeat started.");
 
     while (this.active) {
-      const { status } = await sendHeartbeat(jobId); // Call your sendHeartbeat function
+      const { status } = await sendHeartbeat(this.jobId, this.log); // Call your sendHeartbeat function
       if (status === "canceled") {
-        console.log(`Job ${this.jobId} was canceled, stopping heartbeat.`);
+        this.log.info("Job was canceled, stopping heartbeat.");
         await onCanceled();
         break;
       }
@@ -176,12 +191,12 @@ export class HeartbeatManager {
       await this.waiter; // Wait for 30 seconds before the next heartbeat
     }
 
-    console.log(`Heartbeat stopped fir job ${this.jobId}`);
+    this.log.info(`Heartbeat stopped.`);
   }
 
   // Stops the heartbeat loop
   async stopHeartbeat(): Promise<void> {
-    console.log(`Stopping heartbeat for job ${this.jobId}`);
+    this.log.info("Stopping heartbeat");
     this.active = false; // Set the loop to be inactive
     if (this.waiter) {
       await this.waiter; // Wait for the last heartbeat to complete
