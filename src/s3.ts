@@ -71,7 +71,7 @@ export async function uploadFile(
     let stream;
     if (compress) {
       log.debug(`Compressing ${localFilePath} file with gzip`);
-      const gzipStream = createGzip();
+      const gzipStream = createGzip({ level: 9 });
       fileStream.pipe(gzipStream);
       stream = gzipStream;
       key = key + ".gz";

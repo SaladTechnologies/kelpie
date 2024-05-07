@@ -23,7 +23,7 @@ const headers = {
   "X-Kelpie-Key": KELPIE_API_KEY,
 };
 
-interface Task {
+export interface Task {
   id: string;
   user_id: string;
   status: "pending" | "running" | "completed" | "canceled" | "failed";

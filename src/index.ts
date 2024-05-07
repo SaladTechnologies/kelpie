@@ -1,10 +1,11 @@
-import { mkdirSync } from "fs";
+import { PathLike, mkdirSync } from "fs";
 
 import {
   getWork,
   HeartbeatManager,
   reportFailed,
   reportCompleted,
+  Task,
 } from "./api";
 import { DirectoryWatcher, recursivelyClearFilesInDirectory } from "./files";
 import {
@@ -40,6 +41,40 @@ async function clearAllDirectories(): Promise<void> {
 
 async function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function uploadAndCompleteJob(
+  work: Task,
+  dirToUpload: string,
+  heartbeatManager: HeartbeatManager
+): Promise<void> {
+  try {
+    await uploadDirectory(
+      dirToUpload,
+      work.output_bucket,
+      work.output_prefix,
+      2,
+      !!work.compression
+    );
+  } catch (e: any) {
+    log.error("Error uploading output directory: ", e);
+    await reportFailed(work.id);
+    return;
+  }
+
+  try {
+    await reportCompleted(work.id);
+  } catch (e: any) {
+    log.error("Error reporting job completion: ", e);
+    return;
+  }
+
+  log.info(
+    `Output directory uploaded and job completed. Removing ${dirToUpload}...`
+  );
+  await fs.rmdir(dirToUpload, { recursive: true });
+
+  await heartbeatManager.stopHeartbeat();
 }
 
 let keepAlive = true;
@@ -174,26 +209,10 @@ async function main() {
         const newDir = `/output-${work.id}`;
         await fs.rename(OUTPUT_DIR, newDir);
         await fs.mkdir(OUTPUT_DIR, { recursive: true });
-        uploadDirectory(
-          newDir,
-          work.output_bucket,
-          work.output_prefix,
-          2,
-          !!work.compression
-        )
-          .then(() => reportCompleted(work.id))
-          .catch(() => {
-            log.error("Error uploading output directory and completing job");
-            reportFailed(work.id);
-          })
-          .finally(() => {
-            log.info(
-              `Output directory uploaded and job completed. Removing ${newDir}...`
-            );
-            fs.rmdir(newDir, { recursive: true });
-          });
+        uploadAndCompleteJob(work, newDir, heartbeatManager);
       } else {
         await reportFailed(work.id);
+        await heartbeatManager.stopHeartbeat();
         log.error(`Work failed with exit code ${exitCode} on job ${work.id}`);
       }
     } catch (e: any) {
@@ -203,10 +222,11 @@ async function main() {
         log.error("Error processing work: ", e);
         await reportFailed(work.id);
       }
+      await heartbeatManager.stopHeartbeat();
     }
     await checkpointWatcher.stopWatching();
     await outputWatcher.stopWatching();
-    await heartbeatManager.stopHeartbeat();
+
     await clearAllDirectories();
   }
 }
