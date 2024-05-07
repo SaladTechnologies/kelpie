@@ -11,7 +11,8 @@ import { Readable } from "stream";
 import path from "path";
 import fsPromises from "fs/promises";
 import { createGzip, createGunzip } from "zlib";
-import { log } from "./logger";
+import { log as baseLogger } from "./logger";
+import { Logger } from "pino";
 
 const { AWS_REGION, AWS_DEFAULT_REGION } = process.env;
 
@@ -57,7 +58,8 @@ export async function uploadFile(
   localFilePath: string,
   bucketName: string,
   key: string,
-  compress: boolean = false
+  compress: boolean = false,
+  log: Logger
 ): Promise<void> {
   try {
     if (ongoingUploads.has(localFilePath)) {
@@ -121,7 +123,8 @@ export async function downloadFile(
   bucketName: string,
   key: string,
   localFilePath: string,
-  decompress: boolean = false
+  decompress: boolean = false,
+  log: Logger
 ): Promise<void> {
   try {
     const start = Date.now();
@@ -144,7 +147,9 @@ export async function downloadFile(
         let stream: Readable = data.Body;
         if (isGzipped) {
           log.debug(`Decompressing ${key} file with gunzip`);
-          stream = stream.pipe(createGunzip());
+          const unzipStream = createGunzip();
+          unzipStream.on("error", (err) => reject(err));
+          stream = stream.pipe(unzipStream);
         }
 
         // Loop through body chunks and write to file
@@ -214,14 +219,15 @@ async function processBatch(
   bucket: string,
   prefix: string,
   outputDir: string,
-  decompress: boolean = false
+  decompress: boolean = false,
+  log: Logger
 ) {
   const downloadPromises = batch.map(async (key) => {
     const filename = key.replace(prefix, "");
     const localFilePath = path.join(outputDir, filename);
     const dir = path.dirname(localFilePath);
     await fsPromises.mkdir(dir, { recursive: true });
-    return downloadFile(bucket, key, localFilePath, decompress);
+    return downloadFile(bucket, key, localFilePath, decompress, log);
   });
 
   const results = await Promise.allSettled(downloadPromises);
@@ -237,7 +243,8 @@ export async function downloadAllFilesFromPrefix(
   prefix: string,
   outputDir: string,
   batchSize: number = 10,
-  decompress: boolean = false
+  decompress: boolean = false,
+  log: Logger
 ): Promise<void> {
   try {
     log.info(
@@ -249,7 +256,7 @@ export async function downloadAllFilesFromPrefix(
     // Download files in batches
     for (let i = 0; i < allKeys.length; i += batchSize) {
       const batch = allKeys.slice(i, i + batchSize);
-      await processBatch(batch, bucket, prefix, outputDir, decompress);
+      await processBatch(batch, bucket, prefix, outputDir, decompress, log);
     }
 
     log.info(
@@ -265,7 +272,8 @@ export async function uploadDirectory(
   bucket: string,
   prefix: string,
   batchSize: number = 10,
-  compress: boolean = false
+  compress: boolean = false,
+  log: Logger
 ): Promise<void> {
   try {
     log.info(`Uploading directory ${directory} to storage bucket: ${bucket}`);
@@ -277,7 +285,7 @@ export async function uploadDirectory(
         batch.map(async (filePath) => {
           const localFilePath = path.join(directory, filePath);
           const key = prefix + filePath;
-          return await uploadFile(localFilePath, bucket, key, compress);
+          return await uploadFile(localFilePath, bucket, key, compress, log);
         })
       );
     }
@@ -308,7 +316,11 @@ async function getAllFilePaths(dir: string): Promise<string[]> {
   return fileList;
 }
 
-export async function deleteFile(bucket: string, key: string): Promise<void> {
+export async function deleteFile(
+  bucket: string,
+  key: string,
+  log: Logger
+): Promise<void> {
   try {
     log.info(`Deleting file s3://${bucket}/${key}`);
     const params = {
