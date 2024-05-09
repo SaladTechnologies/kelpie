@@ -1,6 +1,7 @@
 import assert from "assert";
 import { log as baseLogger } from "./logger";
 import { Logger } from "pino";
+import { Task } from "./types";
 
 let {
   KELPIE_API_URL,
@@ -23,34 +24,6 @@ const headers = {
   "Content-Type": "application/json",
   "X-Kelpie-Key": KELPIE_API_KEY,
 };
-
-export interface Task {
-  id: string;
-  user_id: string;
-  status: "pending" | "running" | "completed" | "canceled" | "failed";
-  created: string;
-  started?: string;
-  completed?: string;
-  canceled?: string;
-  failed?: string;
-  heartbeat?: string;
-  num_failures: number;
-  machine_id: string;
-  command: string;
-  arguments: any[];
-  environment: Record<string, string>;
-  input_bucket: string;
-  input_prefix: string;
-  checkpoint_bucket: string;
-  checkpoint_prefix: string;
-  output_bucket: string;
-  output_prefix: string;
-  heartbeat_interval: number;
-  max_failures: number;
-  webhook?: string;
-  container_group_id: string;
-  compression?: boolean;
-}
 
 async function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));

@@ -11,8 +11,8 @@ import { Readable } from "stream";
 import path from "path";
 import fsPromises from "fs/promises";
 import { createGzip, createGunzip } from "zlib";
-import { log as baseLogger } from "./logger";
 import { Logger } from "pino";
+import { SyncConfig } from "./types";
 
 const { AWS_REGION, AWS_DEFAULT_REGION } = process.env;
 
@@ -238,19 +238,32 @@ async function processBatch(
   });
 }
 
-export async function downloadAllFilesFromPrefix(
-  bucket: string,
-  prefix: string,
-  outputDir: string,
-  batchSize: number = 10,
-  decompress: boolean = false,
-  log: Logger
-): Promise<void> {
+export async function downloadAllFilesFromPrefix({
+  bucket,
+  prefix,
+  outputDir,
+  batchSize = 10,
+  decompress = false,
+  log,
+  pattern,
+}: {
+  bucket: string;
+  prefix: string;
+  outputDir: string;
+  batchSize: number;
+  decompress: boolean;
+  log: Logger;
+  pattern?: RegExp;
+}): Promise<void> {
   try {
     log.info(
       `Downloading all files with prefix ${prefix} from storage bucket: ${bucket}`
     );
-    const allKeys = await listAllS3Objects(bucket, prefix);
+    let allKeys = await listAllS3Objects(bucket, prefix);
+    if (pattern) {
+      log.info(`Filtering files with pattern: ${pattern}`);
+      allKeys = allKeys.filter((key) => pattern.test(key));
+    }
     log.info(`Found ${allKeys.length} files to download`);
 
     // Download files in batches
@@ -267,17 +280,30 @@ export async function downloadAllFilesFromPrefix(
   }
 }
 
-export async function uploadDirectory(
-  directory: string,
-  bucket: string,
-  prefix: string,
-  batchSize: number = 10,
-  compress: boolean = false,
-  log: Logger
-): Promise<void> {
+export async function uploadDirectory({
+  directory,
+  bucket,
+  prefix,
+  batchSize = 10,
+  compress = false,
+  log,
+  pattern,
+}: {
+  directory: string;
+  bucket: string;
+  prefix: string;
+  batchSize: number;
+  compress: boolean;
+  log: Logger;
+  pattern?: RegExp;
+}): Promise<void> {
   try {
     log.info(`Uploading directory ${directory} to storage bucket: ${bucket}`);
-    const fileList = await getAllFilePaths(directory);
+    let fileList = await getAllFilePaths(directory);
+    if (pattern) {
+      log.info(`Filtering files with pattern: ${pattern}`);
+      fileList = fileList.filter((key) => pattern.test(key));
+    }
     log.info(`Found ${fileList.length} files to upload`);
     for (let i = 0; i < fileList.length; i += batchSize) {
       const batch = fileList.slice(i, i + batchSize);
@@ -332,4 +358,63 @@ export async function deleteFile(
   } catch (err) {
     log.error("Error deleting file: ", err);
   }
+}
+
+export async function downloadSyncConfig(
+  config: SyncConfig,
+  compression: boolean,
+  log: Logger
+) {
+  const { bucket, prefix, local_path, direction, pattern } = config;
+  if (direction === "download") {
+    await downloadAllFilesFromPrefix({
+      bucket,
+      prefix,
+      outputDir: local_path,
+      batchSize: 20,
+      decompress: compression,
+      log,
+      pattern: pattern ? patternToRegex(pattern) : undefined,
+    });
+  }
+}
+
+export async function uploadSyncConfig(
+  config: SyncConfig,
+  compression: boolean,
+  log: Logger
+) {
+  const { local_path, bucket, prefix, direction, pattern } = config;
+  if (direction === "upload") {
+    await uploadDirectory({
+      directory: local_path,
+      bucket,
+      prefix,
+      batchSize: 20,
+      compress: compression,
+      log,
+      pattern: pattern ? patternToRegex(pattern) : undefined,
+    });
+  }
+}
+
+export function patternToRegex(pattern: string): RegExp {
+  // Escape special regex characters in the pattern except `?`, `*`, `!(`, and `)`
+  let escapedPattern = pattern.replace(/[-/\\^$+?.()|[\]{}]/g, "\\$&");
+
+  // Replace `?` with `.` for a single-character match
+  escapedPattern = escapedPattern.replace(/\?/g, ".");
+
+  // Replace `*` with `.*` for zero or more characters
+  escapedPattern = escapedPattern.replace(/\*/g, ".*");
+
+  // Replace `!(...)` with a negative lookahead assertion `(?!...)`
+  const negationPattern = /!\(([^)]*)\)/g;
+  escapedPattern = escapedPattern.replace(negationPattern, "(?!$1)");
+
+  // Create the final regex string with anchors
+  const regexString = `^${escapedPattern}$`;
+
+  // Return the constructed regex
+  return new RegExp(regexString);
 }
