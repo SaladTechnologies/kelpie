@@ -42,13 +42,14 @@ async function fetchUpToNTimes<T>(
       if (response.ok) {
         return response.json() as Promise<T>;
       } else {
-        log.warn("Error fetching data, retrying: ", await response.text());
+        const body = await response.text();
+        log.warn(`Error fetching data, retrying: ${body}`);
         retries++;
         await sleep(retries * 1000);
         continue;
       }
     } catch (err: any) {
-      log.warn("Error fetching data, retrying: ", err.message);
+      log.warn(`Error fetching data, retrying: ${err.message}`);
       retries++;
       await sleep(retries * 1000);
       continue;

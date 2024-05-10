@@ -304,6 +304,7 @@ async function main() {
             })
           )
             .then(async () => {
+              heartbeatManager.stopHeartbeat();
               await reportCompleted(work.id, log);
             })
             .catch(async (e: any) => {

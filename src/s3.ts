@@ -261,7 +261,7 @@ export async function downloadAllFilesFromPrefix({
     );
     let allKeys = await listAllS3Objects(bucket, prefix);
     if (pattern) {
-      log.info(`Filtering files with pattern: ${pattern}`);
+      log.debug(`Filtering files with pattern: ${pattern}`);
       allKeys = allKeys.filter((key) => pattern.test(key));
     }
     log.info(`Found ${allKeys.length} files to download`);
