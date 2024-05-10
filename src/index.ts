@@ -5,7 +5,6 @@ import {
   HeartbeatManager,
   reportFailed,
   reportCompleted,
-  Task,
 } from "./api";
 import { DirectoryWatcher, recursivelyClearFilesInDirectory } from "./files";
 import {
@@ -13,6 +12,8 @@ import {
   uploadDirectory,
   uploadFile,
   deleteFile,
+  downloadSyncConfig,
+  uploadSyncConfig,
 } from "./s3";
 import { CommandExecutor } from "./commands";
 import path from "path";
@@ -20,6 +21,7 @@ import { version } from "../package.json";
 import fs from "fs/promises";
 import { log as baseLogger } from "./logger";
 import { Logger } from "pino";
+import { Task } from "./types";
 
 const {
   INPUT_DIR = "/input",
@@ -33,10 +35,7 @@ mkdirSync(CHECKPOINT_DIR, { recursive: true });
 
 const commandExecutor = new CommandExecutor();
 
-async function clearAllDirectories(): Promise<void> {
-  const dirsToClear = Array.from(
-    new Set([INPUT_DIR, OUTPUT_DIR, CHECKPOINT_DIR])
-  );
+async function clearAllDirectories(dirsToClear: string[]): Promise<void> {
   await Promise.all(
     dirsToClear.map((dir) => recursivelyClearFilesInDirectory(dir, baseLogger))
   );
@@ -53,14 +52,14 @@ async function uploadAndCompleteJob(
   log: Logger
 ): Promise<void> {
   try {
-    await uploadDirectory(
-      dirToUpload,
-      work.output_bucket,
-      work.output_prefix,
-      2,
-      !!work.compression,
-      log
-    );
+    await uploadDirectory({
+      directory: dirToUpload,
+      bucket: work.output_bucket!,
+      prefix: work.output_prefix!,
+      batchSize: 2,
+      compress: !!work.compression,
+      log,
+    });
   } catch (e: any) {
     log.error("Error uploading output directory: ", e);
     await reportFailed(work.id, log);
@@ -94,9 +93,13 @@ process.on("SIGTERM", () => {
   process.exit();
 });
 
+const filesBeingSynced = new Set();
+
 async function main() {
   baseLogger.info(`Kelpie v${version} started`);
-  await clearAllDirectories();
+  await clearAllDirectories(
+    Array.from(new Set([INPUT_DIR, OUTPUT_DIR, CHECKPOINT_DIR]))
+  );
 
   while (keepAlive) {
     let work;
@@ -117,87 +120,159 @@ async function main() {
     log.info(`Received work: ${work.id}`);
 
     log.info("Starting heartbeat manager...");
-    const checkpointWatcher = new DirectoryWatcher(CHECKPOINT_DIR, log);
-    const outputWatcher = new DirectoryWatcher(OUTPUT_DIR, log);
     const heartbeatManager = new HeartbeatManager(work.id, log);
 
+    const directoryWatchers: DirectoryWatcher[] = [];
+
     heartbeatManager.startHeartbeat(work.heartbeat_interval, async () => {
-      await outputWatcher.stopWatching();
-      await checkpointWatcher.stopWatching();
+      await Promise.all(
+        directoryWatchers.map((watcher) => watcher.stopWatching())
+      );
       commandExecutor.interrupt();
     });
 
-    // Download required files
-    try {
-      await downloadAllFilesFromPrefix(
-        work.input_bucket,
-        work.input_prefix,
-        INPUT_DIR,
-        20,
-        !!work.compression,
-        log
-      );
-    } catch (e: any) {
-      log.error("Error downloading input files: ", e);
-      // await reportFailed(work.id);
-      continue;
-    }
-
-    try {
-      await downloadAllFilesFromPrefix(
-        work.checkpoint_bucket,
-        work.checkpoint_prefix,
-        CHECKPOINT_DIR,
-        20,
-        !!work.compression,
-        log
-      );
-    } catch (e: any) {
-      log.error("Error downloading checkpoint files: ", e);
-      // await reportFailed(work.id);
-      continue;
-    }
-
-    log.info(
-      "All files downloaded successfully, starting directory watchers..."
-    );
-
-    checkpointWatcher.watchDirectory(
-      async (localFilePath: string, eventType: string) => {
-        const relativeFilename = path.relative(CHECKPOINT_DIR, localFilePath);
-        if (eventType === "add" || eventType === "change") {
-          await uploadFile(
-            localFilePath,
-            work.checkpoint_bucket,
-            work.checkpoint_prefix + relativeFilename,
-            !!work.compression,
-            log
-          );
-        } else if (eventType === "unlink") {
-          await deleteFile(
-            work.checkpoint_bucket,
-            work.checkpoint_prefix + relativeFilename,
-            log
-          );
+    if (work.sync) {
+      if (work.sync.before && work.sync.before.length) {
+        for (const syncConfig of work.sync.before) {
+          await downloadSyncConfig(syncConfig, !!work.compression, log);
         }
       }
-    );
 
-    if (CHECKPOINT_DIR !== OUTPUT_DIR) {
-      outputWatcher.watchDirectory(
-        async (localFilePath: string, eventType: string) => {
-          const relativeFilename = path.relative(OUTPUT_DIR, localFilePath);
-          if (eventType === "add") {
-            await uploadFile(
-              localFilePath,
-              work.output_bucket,
-              work.output_prefix + relativeFilename,
-              !!work.compression,
-              log
-            );
-          }
+      if (work.sync.during && work.sync.during.length) {
+        for (const syncConfig of work.sync.during) {
+          const dirWatcher = new DirectoryWatcher(syncConfig.local_path, log);
+          dirWatcher.watchDirectory(
+            async (localFilePath: string, eventType: string) => {
+              if (filesBeingSynced.has(localFilePath)) {
+                return;
+              }
+              const relativeFilename = path.relative(
+                syncConfig.local_path,
+                localFilePath
+              );
+              if (
+                (eventType === "add" || eventType === "change") &&
+                syncConfig.direction === "upload" &&
+                (!syncConfig.pattern ||
+                  new RegExp(syncConfig.pattern).test(relativeFilename))
+              ) {
+                filesBeingSynced.add(localFilePath);
+                await uploadFile(
+                  localFilePath,
+                  syncConfig.bucket,
+                  syncConfig.prefix + relativeFilename,
+                  !!work.compression,
+                  log
+                );
+                filesBeingSynced.delete(localFilePath);
+              } else if (
+                eventType == "unlink" &&
+                syncConfig.direction === "upload" &&
+                (!syncConfig.pattern ||
+                  new RegExp(syncConfig.pattern).test(relativeFilename))
+              ) {
+                filesBeingSynced.add(localFilePath);
+                let keyToDelete = syncConfig.prefix + relativeFilename;
+                if (!!work.compression) {
+                  keyToDelete += ".gz";
+                }
+                await deleteFile(syncConfig.bucket, keyToDelete, log);
+                filesBeingSynced.delete(localFilePath);
+              }
+            }
+          );
+          directoryWatchers.push(dirWatcher);
         }
+      }
+    } else {
+      // Download required files
+      if (work.input_bucket && work.input_prefix) {
+        try {
+          await downloadAllFilesFromPrefix({
+            bucket: work.input_bucket,
+            prefix: work.input_prefix,
+            outputDir: INPUT_DIR,
+            batchSize: 20,
+            decompress: !!work.compression,
+            log,
+          });
+        } catch (e: any) {
+          log.error("Error downloading input files: ", e);
+          // await reportFailed(work.id);
+          continue;
+        }
+      }
+
+      if (work.checkpoint_bucket && work.checkpoint_prefix) {
+        try {
+          await downloadAllFilesFromPrefix({
+            bucket: work.checkpoint_bucket,
+            prefix: work.checkpoint_prefix,
+            outputDir: CHECKPOINT_DIR,
+            batchSize: 20,
+            decompress: !!work.compression,
+            log,
+          });
+        } catch (e: any) {
+          log.error("Error downloading checkpoint files: ", e);
+          // await reportFailed(work.id);
+          continue;
+        }
+        const checkpointWatcher = new DirectoryWatcher(CHECKPOINT_DIR, log);
+
+        checkpointWatcher.watchDirectory(
+          async (localFilePath: string, eventType: string) => {
+            const relativeFilename = path.relative(
+              CHECKPOINT_DIR,
+              localFilePath
+            );
+            if (eventType === "add" || eventType === "change") {
+              await uploadFile(
+                localFilePath,
+                work.checkpoint_bucket!,
+                work.checkpoint_prefix + relativeFilename,
+                !!work.compression,
+                log
+              );
+            } else if (eventType === "unlink") {
+              await deleteFile(
+                work.checkpoint_bucket!,
+                work.checkpoint_prefix + relativeFilename,
+                log
+              );
+            }
+          }
+        );
+
+        directoryWatchers.push(checkpointWatcher);
+      }
+
+      log.info(
+        "All files downloaded successfully, starting directory watchers..."
       );
+
+      if (
+        work.output_bucket &&
+        work.output_prefix &&
+        CHECKPOINT_DIR !== OUTPUT_DIR
+      ) {
+        const outputWatcher = new DirectoryWatcher(OUTPUT_DIR, log);
+        outputWatcher.watchDirectory(
+          async (localFilePath: string, eventType: string) => {
+            const relativeFilename = path.relative(OUTPUT_DIR, localFilePath);
+            if (eventType === "add") {
+              await uploadFile(
+                localFilePath,
+                work.output_bucket!,
+                work.output_prefix + relativeFilename,
+                !!work.compression,
+                log
+              );
+            }
+          }
+        );
+        directoryWatchers.push(outputWatcher);
+      }
     }
 
     try {
@@ -206,17 +281,39 @@ async function main() {
         work.arguments,
         { ...work.environment, INPUT_DIR, OUTPUT_DIR, CHECKPOINT_DIR }
       );
-      await checkpointWatcher.stopWatching();
-      await outputWatcher.stopWatching();
+      await Promise.all(
+        directoryWatchers.map((watcher) => watcher.stopWatching())
+      );
 
       if (exitCode === 0) {
         log.info(`Work completed successfully on job ${work.id}`);
         await sleep(1000); // Sleep for a second to ensure the output files are written
         // Move the output directory to a separate location and upload it asynchronously
-        const newDir = `/output-${work.id}`;
-        await fs.rename(OUTPUT_DIR, newDir);
-        await fs.mkdir(OUTPUT_DIR, { recursive: true });
-        uploadAndCompleteJob(work, newDir, heartbeatManager, log);
+        if (!work.sync) {
+          const newDir = `/output-${work.id}`;
+          await fs.rename(OUTPUT_DIR, newDir);
+          await fs.mkdir(OUTPUT_DIR, { recursive: true });
+          uploadAndCompleteJob(work, newDir, heartbeatManager, log);
+        } else if (work.sync.after && work.sync.after.length) {
+          Promise.all(
+            work.sync.after.map(async (syncConfig) => {
+              const newDir = `${syncConfig.local_path}-${work.id}`;
+              await fs.rename(syncConfig.local_path, newDir);
+              syncConfig.local_path = newDir;
+              await uploadSyncConfig(syncConfig, !!work.compression, log);
+            })
+          )
+            .then(async () => {
+              await reportCompleted(work.id, log);
+            })
+            .catch(async (e: any) => {
+              log.error("Error processing sync config: ", e);
+              await reportFailed(work.id, log);
+            })
+            .finally(async () => {
+              await heartbeatManager.stopHeartbeat();
+            });
+        }
       } else {
         await reportFailed(work.id, log);
         await heartbeatManager.stopHeartbeat();
@@ -231,10 +328,31 @@ async function main() {
       }
       await heartbeatManager.stopHeartbeat();
     }
-    await checkpointWatcher.stopWatching();
-    await outputWatcher.stopWatching();
+    await Promise.all(
+      directoryWatchers.map((watcher) => watcher.stopWatching())
+    );
 
-    await clearAllDirectories();
+    let dirsToClear = [INPUT_DIR, OUTPUT_DIR, CHECKPOINT_DIR];
+    if (work.sync) {
+      if (work.sync.before && work.sync.before.length) {
+        dirsToClear.push(
+          ...work.sync.before.map((syncConfig) => syncConfig.local_path)
+        );
+      }
+      if (work.sync.during && work.sync.during.length) {
+        dirsToClear.push(
+          ...work.sync.during.map((syncConfig) => syncConfig.local_path)
+        );
+      }
+      if (work.sync.after && work.sync.after.length) {
+        dirsToClear.push(
+          ...work.sync.after.map((syncConfig) => syncConfig.local_path)
+        );
+      }
+    }
+    dirsToClear = Array.from(new Set(dirsToClear));
+
+    await clearAllDirectories(dirsToClear);
   }
 }
 
