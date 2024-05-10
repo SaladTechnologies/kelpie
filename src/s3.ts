@@ -374,7 +374,7 @@ export async function downloadSyncConfig(
       batchSize: 20,
       decompress: compression,
       log,
-      pattern: pattern ? patternToRegex(pattern) : undefined,
+      pattern: pattern ? new RegExp(pattern) : undefined,
     });
   }
 }
@@ -393,28 +393,7 @@ export async function uploadSyncConfig(
       batchSize: 20,
       compress: compression,
       log,
-      pattern: pattern ? patternToRegex(pattern) : undefined,
+      pattern: pattern ? new RegExp(pattern) : undefined,
     });
   }
-}
-
-export function patternToRegex(pattern: string): RegExp {
-  // Escape special regex characters in the pattern except `?`, `*`, `!(`, and `)`
-  let escapedPattern = pattern.replace(/[-/\\^$+?.()|[\]{}]/g, "\\$&");
-
-  // Replace `?` with `.` for a single-character match
-  escapedPattern = escapedPattern.replace(/\?/g, ".");
-
-  // Replace `*` with `.*` for zero or more characters
-  escapedPattern = escapedPattern.replace(/\*/g, ".*");
-
-  // Replace `!(...)` with a negative lookahead assertion `(?!...)`
-  const negationPattern = /!\(([^)]*)\)/g;
-  escapedPattern = escapedPattern.replace(negationPattern, "(?!$1)");
-
-  // Create the final regex string with anchors
-  const regexString = `^${escapedPattern}$`;
-
-  // Return the constructed regex
-  return new RegExp(regexString);
 }

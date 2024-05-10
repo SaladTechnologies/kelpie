@@ -14,7 +14,6 @@ import {
   deleteFile,
   downloadSyncConfig,
   uploadSyncConfig,
-  patternToRegex,
 } from "./s3";
 import { CommandExecutor } from "./commands";
 import path from "path";
@@ -155,7 +154,7 @@ async function main() {
                 (eventType === "add" || eventType === "change") &&
                 syncConfig.direction === "upload" &&
                 (!syncConfig.pattern ||
-                  patternToRegex(syncConfig.pattern).test(relativeFilename))
+                  new RegExp(syncConfig.pattern).test(relativeFilename))
               ) {
                 filesBeingSynced.add(localFilePath);
                 await uploadFile(
@@ -170,7 +169,7 @@ async function main() {
                 eventType == "unlink" &&
                 syncConfig.direction === "upload" &&
                 (!syncConfig.pattern ||
-                  patternToRegex(syncConfig.pattern).test(relativeFilename))
+                  new RegExp(syncConfig.pattern).test(relativeFilename))
               ) {
                 filesBeingSynced.add(localFilePath);
                 let keyToDelete = syncConfig.prefix + relativeFilename;
