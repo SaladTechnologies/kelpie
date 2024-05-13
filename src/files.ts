@@ -25,12 +25,12 @@ function waitForFileStability(filePath: string): Promise<void> {
             resolve();
           } else {
             retries++;
-            setTimeout(checkFile, 100); // Shortened interval due to smaller file size
+            setTimeout(checkFile, 50);
           }
         } else {
           lastKnownSize = stats.size;
           retries = 0;
-          setTimeout(checkFile, 100);
+          setTimeout(checkFile, 50);
         }
       });
     };
