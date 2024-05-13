@@ -64,6 +64,9 @@ export class DirectoryWatcher {
       this.log.debug(`Event: add on ${path}`);
       const task = waitForFileStability(path)
         .then(() => forEachFile(path, "add"))
+        .catch((err) => {
+          this.log.error(`Error processing file ${path} after add: ${err}`);
+        })
         .finally(() => {
           this.activeTasks.delete(task);
         });
@@ -74,6 +77,9 @@ export class DirectoryWatcher {
       this.log.debug(`Event: change on ${path}`);
       const task = waitForFileStability(path)
         .then(() => forEachFile(path, "change"))
+        .catch((err) => {
+          this.log.error(`Error processing file ${path} after change: ${err}`);
+        })
         .finally(() => {
           this.activeTasks.delete(task);
         });
@@ -82,9 +88,13 @@ export class DirectoryWatcher {
 
     this.watcher.on("unlink", async (path: string) => {
       this.log.debug(`Event: unlink on ${path}`);
-      const task = forEachFile(path, "unlink").finally(() => {
-        this.activeTasks.delete(task);
-      });
+      const task = forEachFile(path, "unlink")
+        .catch((err) => {
+          this.log.error(`Error processing file ${path} after unlink: ${err}`);
+        })
+        .finally(() => {
+          this.activeTasks.delete(task);
+        });
       this.activeTasks.add(task);
     });
   }
