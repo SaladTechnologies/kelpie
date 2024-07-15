@@ -25,14 +25,14 @@ Kelpie shepherds long-running jobs through to completion on interruptible hardwa
 
 ## Who is it for?
 
-Kelpie is for anyone who wants to run long running compute-intensive jobs on [Salad](https://salad.com/), whether that's [LoRA training](https://blog.salad.com/cost-effective-stable-diffusion-fine-tuning-on-salad/), Monte Carlo simulations, Molecular Dynamics simulations, or anything else.
+Kelpie is for anyone who wants to run long running compute-intensive jobs on [Salad](https://salad.com/), the world's largest distributed GPU cloud. Whether that's [LoRA training](https://blog.salad.com/cost-effective-stable-diffusion-fine-tuning-on-salad/), Monte Carlo simulations, Molecular Dynamics simulations, or anything else, Kelpie can help you run your jobs to completion, even if they take days or weeks.
 You bring your own docker container that contains your script and dependencies, add the Kelpie binary to it, and deploy.
 
 If you'd like to join the Kelpie beta, and are an existing Salad customer, just reach out to your point of contact via email, discord, or slack. If you're interested in Kelpie and are new to Salad, [sign up for a demo](https://salad.com/get-a-demo), and mention you're interested in using Kelpie.
 
 ## How it Works
 
-![Kelpie Diagram](./kelpie-architecture.png)
+![Kelpie Diagram](./kelpie-architecture.png)``s
 
 Kelpie is a standalone binary that runs in your container image. It coordinates with the Kelpie API to download your input data, upload your output data, and sync progress checkpoints to your s3-compatible storage. You submit jobs to the [Kelpie API](https://kelpie.saladexamples.com/docs), and those jobs get assigned to salad worker nodes that have the Kelpie binary installed. 
 
