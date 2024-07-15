@@ -32,7 +32,7 @@ If you'd like to join the Kelpie beta, and are an existing Salad customer, just 
 
 ## How it Works
 
-![Kelpie Diagram](./kelpie-architecture.png)``s
+![Kelpie Diagram](./kelpie-architecture.png)
 
 Kelpie is a standalone binary that runs in your container image. It coordinates with the Kelpie API to download your input data, upload your output data, and sync progress checkpoints to your s3-compatible storage. You submit jobs to the [Kelpie API](https://kelpie.saladexamples.com/docs), and those jobs get assigned to salad worker nodes that have the Kelpie binary installed. 
 
