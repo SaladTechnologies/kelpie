@@ -5,6 +5,7 @@ Kelpie shepherds long-running jobs through to completion on interruptible hardwa
 
 - [🐕 Kelpie (beta)](#-kelpie-beta)
   - [Who is it for?](#who-is-it-for)
+  - [How it Works](#how-it-works)
   - [Adding the kelpie Worker To Your Container Image](#adding-the-kelpie-worker-to-your-container-image)
   - [What it DOES NOT do](#what-it-does-not-do)
   - [API Authorization](#api-authorization)
@@ -27,6 +28,16 @@ Kelpie is for anyone who wants to run long running compute-intensive jobs on [Sa
 You bring your own docker container that contains your script and dependencies, add the Kelpie binary to it, and deploy.
 
 If you'd like to join the Kelpie beta, and are an existing Salad customer, just reach out to your point of contact via email, discord, or slack. If you're interested in Kelpie and are new to Salad, [sign up for a demo](https://salad.com/get-a-demo), and mention you're interested in using Kelpie.
+
+## How it Works
+
+![Kelpie Diagram](./kelpie-architecture.png)
+
+Kelpie is a standalone binary that runs in your container image. It coordinates with the Kelpie API to download your input data, upload your output data, and sync progress checkpoints to your s3-compatible storage. You submit jobs to the [Kelpie API](https://kelpie.saladexamples.com/docs), and those jobs get assigned to salad worker nodes that have the Kelpie binary installed. 
+
+If you define [scaling rules](https://kelpie.saladexamples.com/docs#/default/post_CreateScalingRule), the Kelpie API will handle starting and stopping your container group, and scaling it up and down in response to job volume.
+
+When a job is assigned to a worker, the worker downloads your input data, and your checkpoint, and runs your command with the provided arguments and environment variables. When files are added to a directory defined in your job definition, Kelpie uploads that file to the bucket and prefix you've defined. When your command exits successfully, the output directory you defined is uploaded to your storage, the job is marked as complete, and a webhook is sent to the url you've provided, if any.
 
 ## Adding the kelpie Worker To Your Container Image
 
@@ -53,7 +64,7 @@ When running the image, you will need additional configuration in the environmen
 
 Additionally, your script must support the following things:
 
-- Environment variables - If these are set by you in your container group configuration, they will be respected, otherwise they will be set by kelpie.
+- (Deprecated) Environment variables - If these are set by you in your container group configuration, they will be respected, otherwise they will be set by kelpie. This functionality has been replaced by the `sync` block in the job definition.
   - `INPUT_DIR`: Where to look for whatever data is needed as input. This will be downloaded from your bucket storage by kelpie prior to running the script.
   - `CHECKPOINT_DIR`: This is where to save progress checkpoints locally. kelpie will handle syncing the contents to your bucket storage, and will make sure any existing checkpoint is downloaded prior to running the script.
   - `OUTPUT_DIR`: This is where to save any output artifacts. kelpie will upload your artifacts to your bucket storage.
@@ -82,7 +93,7 @@ All API requests should use a base url of `https://kelpie.saladexamples.com`.
 
 ## Queueing a job
 
-Queueing a job for processing is a simple post request to the Kelpie API
+Queueing a job for processing is a post request to the Kelpie API. You must provide a command to run, and optionally arguments, environment variables, and sync instructions. A job must also be assigned to a specific container group, using the container group id. You can get your container group id from the [Salad API.](https://docs.salad.com/api-reference/container_groups/get-a-container-group). You can optionally provide a webhook url to receive status updates about your job.
 
 ### `POST /jobs`
 
@@ -97,14 +108,37 @@ Queueing a job for processing is a simple post request to the Kelpie API
     "value"
   ],
   "environment": { "SOME_VAR": "string"},
-  "input_bucket": "my-bucket",
-  "input_prefix": "inputs/job1/",
-  "checkpoint_bucket": "my-bucket",
-  "checkpoint_prefix": "checkpoints/job1/",
-  "output_bucket": "my-bucket",
-  "output_prefix": "outputs/job1/",
   "webhook": "https://myapi.com/kelpie-webhooks",
-  "container_group_id": "97f504e8-6de6-4322-b5d5-1777a59a7ad3"
+  "container_group_id": "97f504e8-6de6-4322-b5d5-1777a59a7ad3",
+  "sync": {
+    "before": [
+      {
+        "bucket": "string",
+        "prefix": "string",
+        "local_path": "string",
+        "direction": "download",
+        "pattern": "checkpoint-*"
+      }
+    ],
+    "during": [
+      {
+        "bucket": "string",
+        "prefix": "string",
+        "local_path": "string",
+        "direction": "upload",
+        "pattern": "*.bin"
+      }
+    ],
+    "after": [
+      {
+        "bucket": "string",
+        "prefix": "string",
+        "local_path": "string",
+        "direction": "upload",
+        "pattern": "*.bin"
+      }
+    ]
+  }
 }
 ```
 
@@ -127,17 +161,40 @@ Queueing a job for processing is a simple post request to the Kelpie API
     "value"
   ],
   "environment": { "SOME_VAR": "string"},
-  "input_bucket": "my-bucket",
-  "input_prefix": "inputs/job1/",
-  "checkpoint_bucket": "my-bucket",
-  "checkpoint_prefix": "checkpoints/job1/",
-  "output_bucket": "my-bucket",
-  "output_prefix": "outputs/job1/",
   "webhook": "https://myapi.com/kelpie-webhooks",
   "heartbeat": null,
   "num_failures": 0,
   "container_group_id": "97f504e8-6de6-4322-b5d5-1777a59a7ad3",
-  "machine_id": null
+  "machine_id": null,
+  "sync": {
+    "before": [
+      {
+        "bucket": "string",
+        "prefix": "string",
+        "local_path": "string",
+        "direction": "download",
+        "pattern": "checkpoint-*"
+      }
+    ],
+    "during": [
+      {
+        "bucket": "string",
+        "prefix": "string",
+        "local_path": "string",
+        "direction": "upload",
+        "pattern": "*.bin"
+      }
+    ],
+    "after": [
+      {
+        "bucket": "string",
+        "prefix": "string",
+        "local_path": "string",
+        "direction": "upload",
+        "pattern": "*.bin"
+      }
+    ]
+  }
 }
 ```
 
@@ -179,17 +236,40 @@ As mentioned above, Kelpie does not monitor the progress of your job, but it doe
     "--arg",
     "value"
   ],
-  "input_bucket": "my-bucket",
-  "input_prefix": "inputs/job1/",
-  "checkpoint_bucket": "my-bucket",
-  "checkpoint_prefix": "checkpoints/job1/",
-  "output_bucket": "my-bucket",
-  "output_prefix": "outputs/job1/",
   "webhook": "https://myapi.com/kelpie-webhooks",
   "heartbeat": null,
   "num_failures": 0,
   "container_group_id": "97f504e8-6de6-4322-b5d5-1777a59a7ad3",
-  "machine_id": null
+  "machine_id": null,
+  "sync": {
+    "before": [
+      {
+        "bucket": "string",
+        "prefix": "string",
+        "local_path": "string",
+        "direction": "download",
+        "pattern": "checkpoint-*"
+      }
+    ],
+    "during": [
+      {
+        "bucket": "string",
+        "prefix": "string",
+        "local_path": "string",
+        "direction": "upload",
+        "pattern": "*.bin"
+      }
+    ],
+    "after": [
+      {
+        "bucket": "string",
+        "prefix": "string",
+        "local_path": "string",
+        "direction": "upload",
+        "pattern": "*.bin"
+      }
+    ]
+  }
 }
 ```
 
@@ -232,17 +312,40 @@ All query parameters for this endpoint are optional.
         "--arg",
         "value"
       ],
-      "input_bucket": "my-bucket",
-      "input_prefix": "inputs/job1/",
-      "checkpoint_bucket": "my-bucket",
-      "checkpoint_prefix": "checkpoints/job1/",
-      "output_bucket": "my-bucket",
-      "output_prefix": "outputs/job1/",
       "webhook": "https://myapi.com/kelpie-webhooks",
       "heartbeat": null,
       "num_failures": 0,
       "container_group_id": "97f504e8-6de6-4322-b5d5-1777a59a7ad3",
-      "machine_id": null
+      "machine_id": null,
+      "sync": {
+        "before": [
+          {
+            "bucket": "string",
+            "prefix": "string",
+            "local_path": "string",
+            "direction": "download",
+            "pattern": "checkpoint-*"
+          }
+        ],
+        "during": [
+          {
+            "bucket": "string",
+            "prefix": "string",
+            "local_path": "string",
+            "direction": "upload",
+            "pattern": "*.bin"
+          }
+        ],
+        "after": [
+          {
+            "bucket": "string",
+            "prefix": "string",
+            "local_path": "string",
+            "direction": "upload",
+            "pattern": "*.bin"
+          }
+        ]
+      }
     }
   ]
 }
