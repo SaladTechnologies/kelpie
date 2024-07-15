@@ -7,6 +7,7 @@ Kelpie shepherds long-running jobs through to completion on interruptible hardwa
   - [Who is it for?](#who-is-it-for)
   - [How it Works](#how-it-works)
   - [Adding the kelpie Worker To Your Container Image](#adding-the-kelpie-worker-to-your-container-image)
+  - [Deploying Your Container Group](#deploying-your-container-group)
   - [What it DOES NOT do](#what-it-does-not-do)
   - [API Authorization](#api-authorization)
     - [Base URL](#base-url)
@@ -44,14 +45,17 @@ When a job is assigned to a worker, the worker downloads your input data, and yo
 You can find a working example [here](https://github.com/SaladTechnologies/kelpie-demo)
 
 ```dockerfile
+# Start with a base image that has the dependencies you need,
+# and can successfully run your script.
 FROM yourimage:yourtag
 
-# Install wget if it is not already present in your image
-RUN apt-get update && install -y wget
+# Add the kelpie binary to your container image
+ADD https://github.com/SaladTechnologies/kelpie/releases/download/0.4.2/kelpie /kelpie
+RUN chmod +x /kelpie
 
-# kelpie is a standalone x86-64 linux binary
-RUN wget https://github.com/SaladTechnologies/kelpie/releases/download/0.4.2/kelpie -O /kelpie && chmod +x /kelpie
-
+# Use kelpie as the "main" command. Kelpie will then execute your
+# command with the provided arguments and environment variables
+# from the job definition.
 CMD ["/kelpie"]
 ```
 
@@ -61,15 +65,24 @@ When running the image, you will need additional configuration in the environmen
 - `KELPIE_API_URL`: the root URL for the coordination API, e.g. kelpie.saladexamples.com
 - `KELPIE_API_KEY`: Your api key for the coordination API, issued by Salad for use with kelpie. NOT your Salad API Key.
 
-
 Additionally, your script must support the following things:
 
+- Saving and Resuming From Checkpoints: Your script should periodically output progress checkpoints to `CHECKPOINT_DIR`, so that the job can be resumed if it gets interrupted. Similarly, when your script starts, it should check `CHECKPOINT_DIR` to see if there is anything to resume, and only start from the beginning if no checkpoint is present.
+- It must exit "successfully" with an exit code of 0 upon completion.
 - (Deprecated) Environment variables - If these are set by you in your container group configuration, they will be respected, otherwise they will be set by kelpie. This functionality has been replaced by the `sync` block in the job definition.
   - `INPUT_DIR`: Where to look for whatever data is needed as input. This will be downloaded from your bucket storage by kelpie prior to running the script.
   - `CHECKPOINT_DIR`: This is where to save progress checkpoints locally. kelpie will handle syncing the contents to your bucket storage, and will make sure any existing checkpoint is downloaded prior to running the script.
   - `OUTPUT_DIR`: This is where to save any output artifacts. kelpie will upload your artifacts to your bucket storage.
-- Saving and Resuming From Checkpoints: Your script should periodically output progress checkpoints to `CHECKPOINT_DIR`, so that the job can be resumed if it gets interrupted. Similarly, when your script starts, it should check `CHECKPOINT_DIR` to see if there is anything to resume, and only start from the beginning if no checkpoint is present.
-- It must exit "successfully" with an exit code of 0 upon completion.
+
+Upload your docker image to the container registry of your choice. Salad supports public and private registries, including Docker Hub, AWS ECR, and GitHub Container Registry, among others.
+
+## Deploying Your Container Group
+
+You can deploy your container group using the [Salad API](https://docs.salad.com/api-reference/container_groups/create-a-container-group), or via the [Salad Portal](https://portal.salad.com/). You will need to add the kelpie salad user (currently shawn.rushefsky@salad.com) to your organization to enable the scaling features of kelpie. Kelpie uses the Salad API to start, stop, and scale your container group in response to job volume.
+
+In your container group configuration, you will provide the docker image url, the hardware configuration needed by your job, and the environment variables detailed above. You do not need to enable Container Gateway, or Job Queues, and you do not need to configure probes. While Salad does offer built-in logging, it is still recommended to connect an external logging service for more advanced features.
+
+Once your container group is deployed, and you've verified that the node starts and runs successfully, you'll want to retrieve the container group ID from the [Salad API](https://docs.salad.com/api-reference/container_groups/get-a-container-group). You will use this ID when submitting jobs to the Kelpie API.
 
 ## What it DOES NOT do
 
