@@ -297,7 +297,9 @@ async function main() {
         } else if (work.sync.after && work.sync.after.length) {
           Promise.all(
             work.sync.after.map(async (syncConfig) => {
-              const newDir = `${syncConfig.local_path}-${work.id}`;
+              const newDir = `${path.resolve(syncConfig.local_path)}-${
+                work.id
+              }`;
               await fs.rename(syncConfig.local_path, newDir);
               syncConfig.local_path = newDir;
               await uploadSyncConfig(syncConfig, !!work.compression, log);
