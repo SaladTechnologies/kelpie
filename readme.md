@@ -50,7 +50,7 @@ You can find a working example [here](https://github.com/SaladTechnologies/kelpi
 FROM yourimage:yourtag
 
 # Add the kelpie binary to your container image
-ADD https://github.com/SaladTechnologies/kelpie/releases/download/0.4.2/kelpie /kelpie
+ADD https://github.com/SaladTechnologies/kelpie/releases/download/0.4.3/kelpie /kelpie
 RUN chmod +x /kelpie
 
 # Use kelpie as the "main" command. Kelpie will then execute your
