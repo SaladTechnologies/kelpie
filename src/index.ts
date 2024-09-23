@@ -21,7 +21,8 @@ import { version } from "../package.json";
 import fs from "fs/promises";
 import { log as baseLogger } from "./logger";
 import { Logger } from "pino";
-import { Task } from "./types";
+import { SyncConfig, Task } from "./types";
+import { Server } from "http";
 
 const {
   INPUT_DIR = "/input",
@@ -295,14 +296,21 @@ async function main() {
           await fs.mkdir(OUTPUT_DIR, { recursive: true });
           uploadAndCompleteJob(work, newDir, heartbeatManager, log);
         } else if (work.sync.after && work.sync.after.length) {
+          // Move the output directory to a separate location and upload it asynchronously
+          const modifiedOutputs: SyncConfig[] = [];
           for (let syncConfig of work.sync.after) {
             const newDir = `${path.resolve(syncConfig.local_path)}-${work.id}`;
             await fs.rename(syncConfig.local_path, newDir);
-            syncConfig.local_path = newDir;
+            await fs.mkdir(syncConfig.local_path, { recursive: true });
+            modifiedOutputs.push({
+              ...syncConfig,
+              local_path: newDir,
+            });
+            log.info(`Moved ${syncConfig.local_path} to ${newDir} for upload`);
           }
 
           Promise.all(
-            work.sync.after.map(async (syncConfig) => {
+            modifiedOutputs.map(async (syncConfig) => {
               await uploadSyncConfig(syncConfig, !!work.compression, log);
             })
           )
@@ -316,6 +324,9 @@ async function main() {
             })
             .finally(async () => {
               await heartbeatManager.stopHeartbeat();
+              await clearAllDirectories(
+                modifiedOutputs.map((syncConfig) => syncConfig.local_path)
+              );
             });
         }
       } else {
