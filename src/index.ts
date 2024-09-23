@@ -295,13 +295,14 @@ async function main() {
           await fs.mkdir(OUTPUT_DIR, { recursive: true });
           uploadAndCompleteJob(work, newDir, heartbeatManager, log);
         } else if (work.sync.after && work.sync.after.length) {
+          for (let syncConfig of work.sync.after) {
+            const newDir = `${path.resolve(syncConfig.local_path)}-${work.id}`;
+            await fs.rename(syncConfig.local_path, newDir);
+            syncConfig.local_path = newDir;
+          }
+
           Promise.all(
             work.sync.after.map(async (syncConfig) => {
-              const newDir = `${path.resolve(syncConfig.local_path)}-${
-                work.id
-              }`;
-              await fs.rename(syncConfig.local_path, newDir);
-              syncConfig.local_path = newDir;
               await uploadSyncConfig(syncConfig, !!work.compression, log);
             })
           )
