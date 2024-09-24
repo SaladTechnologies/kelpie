@@ -61,7 +61,7 @@ async function uploadAndCompleteJob(
       log,
     });
   } catch (e: any) {
-    log.error("Error uploading output directory: ", e);
+    log.error(`Error uploading output directory: ${e.message}`);
     await reportFailed(work.id, log);
     return;
   }
@@ -69,7 +69,7 @@ async function uploadAndCompleteJob(
   try {
     await reportCompleted(work.id, log);
   } catch (e: any) {
-    log.error("Error reporting job completion: ", e);
+    log.error(`Error reporting job completion: ${e.message}`);
     return;
   }
 
@@ -200,7 +200,7 @@ async function main() {
             log,
           });
         } catch (e: any) {
-          log.error("Error downloading input files: ", e);
+          log.error(`Error downloading input files: ${e.message}`);
           // await reportFailed(work.id);
           continue;
         }
@@ -217,7 +217,7 @@ async function main() {
             log,
           });
         } catch (e: any) {
-          log.error("Error downloading checkpoint files: ", e);
+          log.error(`Error downloading checkpoint files: ${e.message}`);
           // await reportFailed(work.id);
           continue;
         }
@@ -328,6 +328,7 @@ async function main() {
           const modifiedOutputs: SyncConfig[] = [];
           for (let syncConfig of work.sync.after) {
             const newDir = `${path.resolve(syncConfig.local_path)}-${work.id}`;
+            log.info(`Moving ${syncConfig.local_path} to ${newDir} for upload`);
             await fs.rename(syncConfig.local_path, newDir);
             await fs.mkdir(syncConfig.local_path, { recursive: true });
             modifiedOutputs.push({
@@ -380,7 +381,9 @@ async function main() {
       if (/terminated due to signal/i.test(e.message)) {
         log.info("Work was interrupted, likely due to remote cancellation");
       } else {
-        log.error("Error processing work: ", e);
+        // TODO: REMOVE THIS CONSOLE LOG BEFORE MERGING TO MAIN
+        console.log(e);
+        log.error(`Error processing work: ${e.message}`);
         await reportFailed(work.id, log);
       }
       await heartbeatManager.stopHeartbeat();
