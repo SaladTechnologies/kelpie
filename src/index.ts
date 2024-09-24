@@ -378,8 +378,6 @@ async function main() {
               await reportCompleted(work.id, log);
             })
             .catch(async (e: any) => {
-              // TODO: REMOVE THIS CONSOLE LOG BEFORE MERGING TO MAIN
-              console.log(e);
               log.error(`Error processing sync config: ${e.message}`);
               await reportFailed(work.id, log);
             })
@@ -402,8 +400,6 @@ async function main() {
       if (/terminated due to signal/i.test(e.message)) {
         log.info("Work was interrupted, likely due to remote cancellation");
       } else {
-        // TODO: REMOVE THIS CONSOLE LOG BEFORE MERGING TO MAIN
-        console.log(e);
         log.error(`Error processing work: ${e.message}`);
         await reportFailed(work.id, log);
       }
