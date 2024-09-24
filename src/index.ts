@@ -132,6 +132,9 @@ async function main() {
       commandExecutor.interrupt();
     });
 
+    /**
+     * This block is event-driven, triggered by file changes in configured directories.
+     */
     if (work.sync) {
       if (work.sync.before && work.sync.before.length) {
         for (const syncConfig of work.sync.before) {
@@ -276,26 +279,52 @@ async function main() {
       }
     }
 
+    /**
+     * Run the command configured by the job, and then handle the outcome of that.
+     */
     try {
       const exitCode = await commandExecutor.execute(
         work.command,
         work.arguments,
         { ...work.environment, INPUT_DIR, OUTPUT_DIR, CHECKPOINT_DIR }
       );
+      /**
+       * Once the script updates, we can stop watching the directories.
+       * This will stop the event-driven file sync behavior that is
+       * defined above, but it will not interrupt any ongoing uploads.
+       */
       await Promise.all(
         directoryWatchers.map((watcher) => watcher.stopWatching())
       );
 
+      /**
+       * If the command exits with a 0 status code, we can consider the job
+       * to be successful. Otherwise, we should report the job as failed.
+       */
       if (exitCode === 0) {
         log.info(`Work completed successfully on job ${work.id}`);
-        await sleep(1000); // Sleep for a second to ensure the output files are written
+
+        // Sleep for a second to ensure the output files are written
+        await sleep(1000);
+
         // Move the output directory to a separate location and upload it asynchronously
         if (!work.sync) {
+          /**
+           * THIS IS LEGACY BEHAVIOR.
+           */
           const newDir = `/output-${work.id}`;
           await fs.rename(OUTPUT_DIR, newDir);
           await fs.mkdir(OUTPUT_DIR, { recursive: true });
+
+          /**
+           * This part is not awaited, so that the primary event loop can continue during this closing
+           * I/O driven operation.
+           */
           uploadAndCompleteJob(work, newDir, heartbeatManager, log);
         } else if (work.sync.after && work.sync.after.length) {
+          /**
+           * work.sync.after is an array of upload sync blocks.
+           */
           // Move the output directory to a separate location and upload it asynchronously
           const modifiedOutputs: SyncConfig[] = [];
           for (let syncConfig of work.sync.after) {
@@ -309,20 +338,34 @@ async function main() {
             log.info(`Moved ${syncConfig.local_path} to ${newDir} for upload`);
           }
 
+          /**
+           * This part is not awaited, so that the primary event loop can continue during this closing
+           * I/O driven operation.
+           */
           Promise.all(
             modifiedOutputs.map(async (syncConfig) => {
               await uploadSyncConfig(syncConfig, !!work.compression, log);
             })
           )
             .then(async () => {
-              heartbeatManager.stopHeartbeat();
+              /**
+               * Now that all uploads are complete, we can report the job as completed.
+               * Only now do we stop the job's heartbeat, because otherwise the job may
+               * be handed out again during final upload.
+               */
+              await heartbeatManager.stopHeartbeat();
               await reportCompleted(work.id, log);
             })
             .catch(async (e: any) => {
-              log.error("Error processing sync config: ", e);
+              // TODO: REMOVE THIS CONSOLE LOG BEFORE MERGING TO MAIN
+              console.log(e);
+              log.error(`Error processing sync config: ${e.message}`);
               await reportFailed(work.id, log);
             })
             .finally(async () => {
+              /**
+               * Finally, we can clear the directories that were used for the sync.
+               */
               await heartbeatManager.stopHeartbeat();
               await clearAllDirectories(
                 modifiedOutputs.map((syncConfig) => syncConfig.local_path)
@@ -343,10 +386,16 @@ async function main() {
       }
       await heartbeatManager.stopHeartbeat();
     }
+
+    /**
+     * While the previous job is being finalized from temporary directories,
+     * we can clear the directories that were used for the job, in preparation for the next job
+     */
     await Promise.all(
       directoryWatchers.map((watcher) => watcher.stopWatching())
     );
 
+    // Clear all directories, including the ones used for sync
     let dirsToClear = [INPUT_DIR, OUTPUT_DIR, CHECKPOINT_DIR];
     if (work.sync) {
       if (work.sync.before && work.sync.before.length) {
@@ -365,6 +414,7 @@ async function main() {
         );
       }
     }
+    // Remove duplicates
     dirsToClear = Array.from(new Set(dirsToClear));
 
     await clearAllDirectories(dirsToClear);
