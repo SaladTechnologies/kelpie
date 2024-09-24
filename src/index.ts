@@ -22,7 +22,6 @@ import fs from "fs/promises";
 import { log as baseLogger } from "./logger";
 import { Logger } from "pino";
 import { SyncConfig, Task } from "./types";
-import { Server } from "http";
 
 const {
   INPUT_DIR = "/input",
