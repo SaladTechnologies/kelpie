@@ -329,8 +329,22 @@ async function main() {
           for (let syncConfig of work.sync.after) {
             const newDir = `${path.resolve(syncConfig.local_path)}-${work.id}`;
             log.info(`Moving ${syncConfig.local_path} to ${newDir} for upload`);
-            await fs.rename(syncConfig.local_path, newDir);
-            await fs.mkdir(syncConfig.local_path, { recursive: true });
+            try {
+              await fs.rename(syncConfig.local_path, newDir);
+            } catch (e: any) {
+              if (e.code && e.code === "EXDEV") {
+                log.warn(
+                  `Cannot move ${syncConfig.local_path} to ${newDir} due to cross-device link, copying instead`
+                );
+                await fs.cp(syncConfig.local_path, newDir, { recursive: true });
+                await fs.rm(syncConfig.local_path, { recursive: true });
+              } else {
+                throw e;
+              }
+            } finally {
+              await fs.mkdir(syncConfig.local_path, { recursive: true });
+            }
+
             modifiedOutputs.push({
               ...syncConfig,
               local_path: newDir,
