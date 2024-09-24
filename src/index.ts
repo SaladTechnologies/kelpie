@@ -21,7 +21,7 @@ import { version } from "../package.json";
 import fs from "fs/promises";
 import { log as baseLogger } from "./logger";
 import { Logger } from "pino";
-import { Task } from "./types";
+import { SyncConfig, Task } from "./types";
 
 const {
   INPUT_DIR = "/input",
@@ -61,7 +61,7 @@ async function uploadAndCompleteJob(
       log,
     });
   } catch (e: any) {
-    log.error("Error uploading output directory: ", e);
+    log.error(`Error uploading output directory: ${e.message}`);
     await reportFailed(work.id, log);
     return;
   }
@@ -69,7 +69,7 @@ async function uploadAndCompleteJob(
   try {
     await reportCompleted(work.id, log);
   } catch (e: any) {
-    log.error("Error reporting job completion: ", e);
+    log.error(`Error reporting job completion: ${e.message}`);
     return;
   }
 
@@ -131,6 +131,9 @@ async function main() {
       commandExecutor.interrupt();
     });
 
+    /**
+     * This block is event-driven, triggered by file changes in configured directories.
+     */
     if (work.sync) {
       if (work.sync.before && work.sync.before.length) {
         for (const syncConfig of work.sync.before) {
@@ -197,7 +200,7 @@ async function main() {
             log,
           });
         } catch (e: any) {
-          log.error("Error downloading input files: ", e);
+          log.error(`Error downloading input files: ${e.message}`);
           // await reportFailed(work.id);
           continue;
         }
@@ -214,7 +217,7 @@ async function main() {
             log,
           });
         } catch (e: any) {
-          log.error("Error downloading checkpoint files: ", e);
+          log.error(`Error downloading checkpoint files: ${e.message}`);
           // await reportFailed(work.id);
           continue;
         }
@@ -275,46 +278,117 @@ async function main() {
       }
     }
 
+    /**
+     * Run the command configured by the job, and then handle the outcome of that.
+     */
     try {
       const exitCode = await commandExecutor.execute(
         work.command,
         work.arguments,
         { ...work.environment, INPUT_DIR, OUTPUT_DIR, CHECKPOINT_DIR }
       );
+      /**
+       * Once the script updates, we can stop watching the directories.
+       * This will stop the event-driven file sync behavior that is
+       * defined above, but it will not interrupt any ongoing uploads.
+       */
       await Promise.all(
         directoryWatchers.map((watcher) => watcher.stopWatching())
       );
 
+      /**
+       * If the command exits with a 0 status code, we can consider the job
+       * to be successful. Otherwise, we should report the job as failed.
+       */
       if (exitCode === 0) {
         log.info(`Work completed successfully on job ${work.id}`);
-        await sleep(1000); // Sleep for a second to ensure the output files are written
+
+        // Sleep for a second to ensure the output files are written
+        await sleep(1000);
+
         // Move the output directory to a separate location and upload it asynchronously
         if (!work.sync) {
+          /**
+           * THIS IS LEGACY BEHAVIOR.
+           */
           const newDir = `/output-${work.id}`;
           await fs.rename(OUTPUT_DIR, newDir);
           await fs.mkdir(OUTPUT_DIR, { recursive: true });
+
+          /**
+           * This part is not awaited, so that the primary event loop can continue during this closing
+           * I/O driven operation.
+           */
           uploadAndCompleteJob(work, newDir, heartbeatManager, log);
         } else if (work.sync.after && work.sync.after.length) {
-          Promise.all(
-            work.sync.after.map(async (syncConfig) => {
-              const newDir = `${path.resolve(syncConfig.local_path)}-${
-                work.id
-              }`;
+          /**
+           * work.sync.after is an array of upload sync blocks.
+           */
+          // Move the output directory to a separate location and upload it asynchronously
+          const modifiedOutputs: SyncConfig[] = [];
+          for (let syncConfig of work.sync.after) {
+            const newDir = `${path.resolve(syncConfig.local_path)}-${work.id}`;
+            log.info(`Moving ${syncConfig.local_path} to ${newDir} for upload`);
+            try {
+              /**
+               * Try moving the folder, because it's faster than copying.
+               */
               await fs.rename(syncConfig.local_path, newDir);
-              syncConfig.local_path = newDir;
+            } catch (e: any) {
+              /**
+               * If the move fails, it's likely due to a cross-device link error,
+               * so we should copy the folder instead.
+               */
+              if (e.code && e.code === "EXDEV") {
+                log.warn(
+                  `Cannot move ${syncConfig.local_path} to ${newDir} due to cross-device link, copying instead`
+                );
+                await fs.cp(syncConfig.local_path, newDir, { recursive: true });
+                await fs.rm(syncConfig.local_path, { recursive: true });
+              } else {
+                throw e;
+              }
+            } finally {
+              await fs.mkdir(syncConfig.local_path, { recursive: true });
+            }
+
+            modifiedOutputs.push({
+              ...syncConfig,
+              local_path: newDir,
+            });
+            log.info(`Moved ${syncConfig.local_path} to ${newDir} for upload`);
+          }
+
+          /**
+           * This part is not awaited, so that the primary event loop can continue during this closing
+           * I/O driven operation.
+           */
+          Promise.all(
+            modifiedOutputs.map(async (syncConfig) => {
               await uploadSyncConfig(syncConfig, !!work.compression, log);
             })
           )
             .then(async () => {
-              heartbeatManager.stopHeartbeat();
+              /**
+               * Now that all uploads are complete, we can report the job as completed.
+               * Only now do we stop the job's heartbeat, because otherwise the job may
+               * be handed out again during final upload.
+               */
+              await heartbeatManager.stopHeartbeat();
               await reportCompleted(work.id, log);
             })
             .catch(async (e: any) => {
-              log.error("Error processing sync config: ", e);
+              log.error(`Error processing sync config: ${e.message}`);
               await reportFailed(work.id, log);
             })
             .finally(async () => {
+              /**
+               * Finally, we can clear the directories that were used for the sync.
+               */
               await heartbeatManager.stopHeartbeat();
+              await clearAllDirectories(
+                modifiedOutputs.map((syncConfig) => syncConfig.local_path)
+              );
             });
         }
       } else {
@@ -326,15 +400,21 @@ async function main() {
       if (/terminated due to signal/i.test(e.message)) {
         log.info("Work was interrupted, likely due to remote cancellation");
       } else {
-        log.error("Error processing work: ", e);
+        log.error(`Error processing work: ${e.message}`);
         await reportFailed(work.id, log);
       }
       await heartbeatManager.stopHeartbeat();
     }
+
+    /**
+     * While the previous job is being finalized from temporary directories,
+     * we can clear the directories that were used for the job, in preparation for the next job
+     */
     await Promise.all(
       directoryWatchers.map((watcher) => watcher.stopWatching())
     );
 
+    // Clear all directories, including the ones used for sync
     let dirsToClear = [INPUT_DIR, OUTPUT_DIR, CHECKPOINT_DIR];
     if (work.sync) {
       if (work.sync.before && work.sync.before.length) {
@@ -353,6 +433,7 @@ async function main() {
         );
       }
     }
+    // Remove duplicates
     dirsToClear = Array.from(new Set(dirsToClear));
 
     await clearAllDirectories(dirsToClear);
