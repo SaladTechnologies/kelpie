@@ -330,8 +330,15 @@ async function main() {
             const newDir = `${path.resolve(syncConfig.local_path)}-${work.id}`;
             log.info(`Moving ${syncConfig.local_path} to ${newDir} for upload`);
             try {
+              /**
+               * Try moving the folder, because it's faster than copying.
+               */
               await fs.rename(syncConfig.local_path, newDir);
             } catch (e: any) {
+              /**
+               * If the move fails, it's likely due to a cross-device link error,
+               * so we should copy the folder instead.
+               */
               if (e.code && e.code === "EXDEV") {
                 log.warn(
                   `Cannot move ${syncConfig.local_path} to ${newDir} due to cross-device link, copying instead`
