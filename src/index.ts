@@ -5,6 +5,7 @@ import {
   HeartbeatManager,
   reportFailed,
   reportCompleted,
+  reallocateMe,
 } from "./api";
 import { DirectoryWatcher, recursivelyClearFilesInDirectory } from "./files";
 import {
@@ -27,11 +28,20 @@ const {
   INPUT_DIR = "/input",
   OUTPUT_DIR = "/output",
   CHECKPOINT_DIR = "/checkpoint",
+
+  // Default to -1, which means no timeout
+  MAX_TIME_WITH_NO_WORK_S = "-1",
+
+  // There are backend implications to this, so we aren't documenting it yet.
+  HEARTBEAT_INTERVAL_S = "10",
 } = process.env;
 
 mkdirSync(INPUT_DIR, { recursive: true });
 mkdirSync(OUTPUT_DIR, { recursive: true });
 mkdirSync(CHECKPOINT_DIR, { recursive: true });
+
+const maxTimeWithNoWorkMs = parseInt(MAX_TIME_WITH_NO_WORK_S, 10) * 1000;
+const heartbeatIntervalMs = parseInt(HEARTBEAT_INTERVAL_S, 10) * 1000;
 
 const commandExecutor = new CommandExecutor();
 
@@ -101,6 +111,7 @@ async function main() {
     Array.from(new Set([INPUT_DIR, OUTPUT_DIR, CHECKPOINT_DIR]))
   );
 
+  let lastWorkReceived = Date.now();
   while (keepAlive) {
     let work;
     try {
@@ -112,10 +123,29 @@ async function main() {
     }
 
     if (!work) {
+      if (
+        maxTimeWithNoWorkMs > 0 &&
+        Date.now() - lastWorkReceived > maxTimeWithNoWorkMs
+      ) {
+        baseLogger.info(
+          `No work received for ${
+            maxTimeWithNoWorkMs / 1000
+          } seconds, exiting...`
+        );
+        keepAlive = false;
+        /**
+         * A common reason to have no work for too long is that the instance is
+         * banned from a particular workload. In this case, we should reallocate
+         * the instance to get a new machine id.
+         */
+        await reallocateMe(baseLogger);
+        break;
+      }
       baseLogger.info("No work available, sleeping for 10 seconds...");
-      await sleep(10000);
+      await sleep(heartbeatIntervalMs);
       continue;
     }
+    lastWorkReceived = Date.now();
     const log = baseLogger.child({ job_id: work.id });
     log.info(`Received work: ${work.id}`);
 
