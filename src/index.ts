@@ -319,7 +319,13 @@ async function main() {
       const exitCode = await commandExecutor.execute(
         work.command,
         work.arguments,
-        { ...work.environment, INPUT_DIR, OUTPUT_DIR, CHECKPOINT_DIR }
+        {
+          ...work.environment,
+          INPUT_DIR,
+          OUTPUT_DIR,
+          CHECKPOINT_DIR,
+          KELPIE_STATE_FILE: state.filename,
+        }
       );
       /**
        * Once the script updates, we can stop watching the directories.

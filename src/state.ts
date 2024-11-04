@@ -4,7 +4,7 @@ import { Logger } from "pino";
 
 const { KELPIE_STATE_FILE = "./kelpie-state.json" } = process.env;
 
-const kelpieStateFile = path.resolve(KELPIE_STATE_FILE);
+export const filename = path.resolve(KELPIE_STATE_FILE);
 
 const state = {
   start: new Date().toISOString(),
@@ -67,7 +67,7 @@ function getJSONState(): any {
 
 export async function saveState(log: Logger): Promise<void> {
   try {
-    await fs.writeFile(kelpieStateFile, getJSONState());
+    await fs.writeFile(filename, getJSONState());
   } catch (err) {
     log.error("Error saving state: ", err);
   }
@@ -81,4 +81,5 @@ export default {
   finishUpload,
   hasUpload,
   saveState,
+  filename,
 };
