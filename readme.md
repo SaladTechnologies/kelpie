@@ -88,7 +88,7 @@ Upload your docker image to the container registry of your choice. Salad support
 | SALAD_CONTAINER_GROUP_ID | The ID of the Salad container group                                                                          | "" (empty string)          | No       |
 | MAX_RETRIES              | The maximum number of retries for API operations                                                             | "3"                        | No       |
 | MAX_JOB_FAILURES         | The maximum number of job failures allowed before an instance should reallocate.                             | "3"                        | No       |
-| MAX_TIME_WITH_NO_WORK_S  | The maximum time to wait for work before exiting. May be exceeded by up to 10 seconds (1 heartbeat interval) | "-1" (Never)               | No       |
+| MAX_TIME_WITH_NO_WORK_S  | The maximum time to wait for work before exiting. May be exceeded by up to 10 seconds (1 heartbeat interval) | "0" (Never)               | No       |
 | KELPIE_LOG_LEVEL         | The log level for kelpie                                                                                     | "info"                     | No       |
 
 Additionally, Kelpie will respect AWS environment variables, such as `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, etc. These are used to authenticate with your s3-compatible storage.

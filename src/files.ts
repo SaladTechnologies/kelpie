@@ -139,7 +139,7 @@ export async function recursivelyClearFilesInDirectory(
     await fsPromises.rm(directory, { recursive: true, force: true });
     await fsPromises.mkdir(directory, { recursive: true });
     log.info("Directory cleared successfully");
-  } catch (err) {
+  } catch (err: any) {
     log.error("Error clearing directory: ", err);
   }
 }

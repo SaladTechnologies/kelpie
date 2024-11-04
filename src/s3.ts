@@ -13,6 +13,7 @@ import fsPromises from "fs/promises";
 import { createGzip, createGunzip } from "zlib";
 import { Logger } from "pino";
 import { SyncConfig } from "./types";
+import state from "./state";
 
 const { AWS_REGION, AWS_DEFAULT_REGION } = process.env;
 
@@ -52,8 +53,6 @@ function getDataRatioString(
   return sizeString;
 }
 
-const ongoingUploads: Set<string> = new Set();
-
 export async function uploadFile(
   localFilePath: string,
   bucketName: string,
@@ -62,11 +61,11 @@ export async function uploadFile(
   log: Logger
 ): Promise<void> {
   try {
-    if (ongoingUploads.has(localFilePath)) {
+    if (state.hasUpload(localFilePath)) {
       log.info(`Upload of ${localFilePath} already in progress`);
       return;
     }
-    ongoingUploads.add(localFilePath);
+    await state.startUpload(localFilePath, log);
     log.info(`Uploading ${localFilePath} to s3://${bucketName}/${key}`);
     // Create a stream from the local file
     const fileStream = fs.createReadStream(localFilePath);
@@ -116,7 +115,7 @@ export async function uploadFile(
   } catch (err) {
     log.error("Error uploading file: ", err);
   }
-  ongoingUploads.delete(localFilePath);
+  await state.finishDownload(localFilePath, log);
 }
 
 export async function downloadFile(
@@ -128,6 +127,11 @@ export async function downloadFile(
 ): Promise<void> {
   try {
     const start = Date.now();
+    if (state.hasDownload(key)) {
+      log.info(`Download of ${key} already in progress`);
+      return;
+    }
+    state.startDownload(localFilePath, log);
 
     const isGzipped = decompress && key.endsWith(".gz");
     if (isGzipped) {
@@ -148,7 +152,11 @@ export async function downloadFile(
         if (isGzipped) {
           log.debug(`Decompressing ${key} file with gunzip`);
           const unzipStream = createGunzip();
-          unzipStream.on("error", (err) => reject(err));
+          unzipStream.on("error", async (err) => {
+            log.error(`Error decompressing ${key} file: ${err}`);
+            state.finishDownload(localFilePath, log);
+            reject(err);
+          });
           stream = stream.pipe(unzipStream);
         }
 
@@ -156,7 +164,11 @@ export async function downloadFile(
         const writeStream = fs.createWriteStream(localFilePath);
         stream
           .pipe(writeStream)
-          .on("error", (err: any) => reject(err))
+          .on("error", (err: any) => {
+            log.error(`Error writing to ${localFilePath}: ${err}`);
+            state.finishDownload(localFilePath, log);
+            reject(err);
+          })
           .on("close", () => {
             const end = Date.now();
 
@@ -171,12 +183,14 @@ export async function downloadFile(
               durString = `${(durMs / 60000).toFixed(2)}m`;
             }
             log.info(`${localFilePath} downloaded in ${durString}`);
+            state.finishDownload(localFilePath, log);
             resolve();
           });
       }
     });
   } catch (err: any) {
     log.error("Error downloading file: ", err);
+    await state.finishDownload(localFilePath, log);
     throw err;
   }
 }
@@ -303,6 +317,10 @@ export async function uploadDirectory({
     if (pattern) {
       log.info(`Filtering files with pattern: ${pattern}`);
       fileList = fileList.filter((key) => pattern.test(key));
+    }
+    if (fileList.length === 0) {
+      log.info("No files found to upload");
+      return;
     }
     log.info(`Found ${fileList.length} files to upload`);
     for (let i = 0; i < fileList.length; i += batchSize) {
