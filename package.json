@@ -21,7 +21,7 @@
   "dependencies": {
     "@aws-sdk/client-s3": "^3.556.0",
     "@aws-sdk/lib-storage": "^3.556.0",
-    "@saladtechnologies-oss/salad-cloud-imds-sdk": "^0.9.0-alpha.3",
+    "@saladtechnologies-oss/salad-cloud-imds-sdk": "^0.9.0-alpha.4",
     "chokidar": "^3.6.0",
     "pino": "^9.0.0"
   },
