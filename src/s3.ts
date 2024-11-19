@@ -6,6 +6,7 @@ import {
   DeleteObjectCommand,
 } from "@aws-sdk/client-s3";
 import { Progress, Upload } from "@aws-sdk/lib-storage";
+import { NodeHttpHandler } from "@smithy/node-http-handler";
 import fs from "fs";
 import { Readable } from "stream";
 import path from "path";
@@ -17,7 +18,13 @@ import state from "./state";
 
 const { AWS_REGION, AWS_DEFAULT_REGION } = process.env;
 
-const s3Client = new S3Client({ region: AWS_REGION || AWS_DEFAULT_REGION });
+const s3Client = new S3Client({
+  region: AWS_REGION || AWS_DEFAULT_REGION,
+  requestHandler: new NodeHttpHandler({
+    requestTimeout: 0,
+    connectionTimeout: 10000,
+  }),
+});
 
 function getDataRatioString(
   loaded: number | undefined,
