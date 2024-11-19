@@ -10,7 +10,7 @@ let {
   SALAD_MACHINE_ID = "",
   SALAD_CONTAINER_GROUP_ID = "",
   MAX_RETRIES = "3",
-  MAX_JOB_FAILURES = "3",
+  MAX_JOB_FAILURES = "5",
 } = process.env;
 
 assert(KELPIE_API_URL, "KELPIE_API_URL is required");
