@@ -73,6 +73,24 @@ export async function saveState(log: Logger): Promise<void> {
   }
 }
 
+export function getState() {
+  return state;
+}
+
+async function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+export async function waitForUploads(
+  log: Logger,
+  intervalMs: number = 1000
+): Promise<void> {
+  while (state.uploads.size > 0) {
+    log.info("Waiting for uploads to finish...");
+    await sleep(intervalMs);
+  }
+}
+
 export default {
   startDownload,
   finishDownload,
@@ -81,5 +99,7 @@ export default {
   finishUpload,
   hasUpload,
   saveState,
+  getState,
+  waitForUploads,
   filename,
 };

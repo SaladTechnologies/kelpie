@@ -138,7 +138,20 @@ async function main() {
         /**
          * A common reason to have no work for too long is that the instance is
          * banned from a particular workload. In this case, we should reallocate
-         * the instance to get a new machine id.
+         * the instance to get a new machine id. However, we want to make sure any uploads
+         * that are currently in progress complete.
+         */
+        if (state.getState().uploads.size > 0) {
+          await state.waitForUploads(baseLogger);
+          /**
+           * Once we've finished our uploads, we check one more time for work,
+           * just in case.
+           */
+          continue;
+        }
+
+        /**
+         * If there are no uploads in progress, we can reallocate the instance.
          */
         await reallocateMe(baseLogger);
         break;
