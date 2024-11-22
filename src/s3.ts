@@ -150,11 +150,15 @@ export async function downloadFile(
       Key: key,
     };
 
-    // Perform the download
+    // Get the object from S3, which returns a stream
     const data = await s3Client.send(new GetObjectCommand(downloadParams));
 
     return new Promise((resolve, reject) => {
       if (data.Body instanceof Readable) {
+        /**
+         * S3 gives us a stream back from our request, which can pipe through
+         * the various steps it needs to take to get to the final file.
+         */
         let stream: Readable = data.Body;
         if (isGzipped) {
           log.debug(`Decompressing ${key} file with gunzip`);
@@ -164,10 +168,17 @@ export async function downloadFile(
             state.finishDownload(localFilePath, log);
             reject(err);
           });
+          /**
+           * If we've determined that the file is gzipped, we'll pipe the stream
+           * directly through the gunzip stream to decompress it.
+           */
           stream = stream.pipe(unzipStream);
         }
 
-        // Loop through body chunks and write to file
+        /**
+         * At this point we have a decompressed stream that we can pipe directly
+         * to the file system to write the file.
+         */
         const writeStream = fs.createWriteStream(localFilePath);
         stream
           .pipe(writeStream)
@@ -259,6 +270,24 @@ async function processBatch(
   });
 }
 
+/**
+ * Downloads all files with a given prefix from an S3 bucket to a local directory,
+ * and with an additional regular expression filter.
+ *
+ * This function downloads files in batches to improve performance. The number of files
+ * downloaded in parallel can be controlled with the `batchSize` parameter.
+ *
+ * If the `decompress` parameter is set to true, the function will decompress the files
+ * while downloading them.
+ *
+ * @param options.bucket The name of the S3 bucket to download from
+ * @param options.prefix The prefix of the files to download
+ * @param options.outputDir The local directory to download the files to
+ * @param options.batchSize The number of files to download in parallel
+ * @param options.decompress Whether to decompress the files after downloading
+ * @param options.log The logger to use for output
+ * @param options.pattern A regular expression to filter the files to download.
+ */
 export async function downloadAllFilesFromPrefix({
   bucket,
   prefix,
@@ -301,6 +330,24 @@ export async function downloadAllFilesFromPrefix({
   }
 }
 
+/**
+ * Uploads all files from a local directory to an S3 bucket with a given prefix.
+ * The function uploads files in batches to improve performance. The number of files
+ * uploaded in parallel can be controlled with the `batchSize` parameter. Files are themselves
+ * uploaded in parallel using the `Upload` class from the `@aws-sdk/lib-storage` package. The
+ * intention is to fully utilize the available bandwidth and improve the overall upload speed.
+ *
+ * If the `compress` parameter is set to true, the function will compress the files
+ * while uploading them.
+ *
+ * The `pattern` parameter can be used to filter the files to upload using a regular
+ * expression.
+ *
+ *
+ *
+ * @param param0
+ * @returns
+ */
 export async function uploadDirectory({
   directory,
   bucket,
