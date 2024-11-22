@@ -6,6 +6,7 @@ Kelpie shepherds long-running jobs through to completion on interruptible hardwa
 
 - [🐕 Kelpie (beta)](#-kelpie-beta)
   - [Who is it for?](#who-is-it-for)
+  - [What it is](#what-it-is)
   - [How it Works](#how-it-works)
   - [Adding the kelpie Worker To Your Container Image](#adding-the-kelpie-worker-to-your-container-image)
   - [Environment Variables](#environment-variables)
@@ -30,7 +31,11 @@ Kelpie shepherds long-running jobs through to completion on interruptible hardwa
 Kelpie is for anyone who wants to run long running compute-intensive jobs on [Salad](https://salad.com/), the world's largest distributed GPU cloud. Whether that's [LoRA training](https://blog.salad.com/cost-effective-stable-diffusion-fine-tuning-on-salad/), Monte Carlo simulations, Molecular Dynamics simulations, or anything else, Kelpie can help you run your jobs to completion, even if they take days or weeks.
 You bring your own docker container that contains your script and dependencies, add the Kelpie binary to it, and deploy.
 
-If you'd like to join the Kelpie beta, and are an existing Salad customer, just reach out to your point of contact via email, discord, or slack. If you're interested in Kelpie and are new to Salad, [sign up for a demo](https://salad.com/get-a-demo), and mention you're interested in using Kelpie.
+If you'd like to join the Kelpie beta, and are an existing Salad customer, just reach out to your point of contact via email, discord, or slack. If you're interested in Kelpie and are new to Salad, reach out to support at [cloud@salad.com](cloud@salad.com), and mention you're interested in using Kelpie.
+
+## What it is
+
+Kelpie is a job queue that is particularly focused on the challenges of running extremely long tasks on interruptible hardware. It is designed to be simple to instrument, and to be able to integrate with any containerized workload. It executes scripts in a container according to a job definition, and handles downloading input data, uploading output data, and syncing progress checkpoints to your s3-compatible storage. It also provides a mechanism for scaling your container group in response to job volume.
 
 ## How it Works
 
