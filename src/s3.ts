@@ -71,6 +71,7 @@ export async function uploadFile(
   try {
     if (state.hasUpload(jobId, localFilePath)) {
       log.info(`Upload of ${localFilePath} already in progress`);
+      log.debug(state.getJSONState());
       return;
     }
     await state.startUpload(jobId, localFilePath, log);
@@ -124,6 +125,7 @@ export async function uploadFile(
     log.error("Error uploading file: ", err);
   }
   await state.finishDownload(jobId, localFilePath, log);
+  log.debug(state.getJSONState());
 }
 
 export async function downloadFile(

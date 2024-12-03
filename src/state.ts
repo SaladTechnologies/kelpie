@@ -72,7 +72,7 @@ export function hasUpload(jobId: string, filePath: string): boolean {
   );
 }
 
-function getJSONState(): any {
+export function getJSONState(): any {
   const { jobs, start } = state;
   return JSON.stringify(
     {
@@ -164,6 +164,7 @@ export default {
   hasUpload,
   saveState,
   getState,
+  getJSONState,
   waitForUploads,
   startJob,
   jobExited,
