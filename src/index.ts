@@ -64,6 +64,7 @@ async function uploadAndCompleteJob(
 ): Promise<void> {
   try {
     await uploadDirectory({
+      jobId: work.id,
       directory: dirToUpload,
       bucket: work.output_bucket!,
       prefix: work.output_prefix!,
@@ -141,11 +142,23 @@ async function main() {
          * the instance to get a new machine id. However, we want to make sure any uploads
          * that are currently in progress complete.
          */
-        if (state.getState().uploads.size > 0) {
-          await state.waitForUploads(baseLogger);
+        const currentState = state.getState();
+        let uploadsInProgress = false;
+        await Promise.all(
+          currentState.jobs.map(async (job) => {
+            if (job.activeUploads.size) {
+              uploadsInProgress = true;
+              baseLogger.info(
+                `Waiting for uploads to finish before reallocation...`
+              );
+              await state.waitForUploads(job.id, baseLogger);
+            }
+          })
+        );
+
+        if (uploadsInProgress) {
           /**
-           * Once we've finished our uploads, we check one more time for work,
-           * just in case.
+           * If there were uploads in progress, we should check for work one more time
            */
           continue;
         }
@@ -163,6 +176,7 @@ async function main() {
     lastWorkReceived = Date.now();
     const log = baseLogger.child({ job_id: work.id });
     log.info(`Received work: ${work.id}`);
+    state.startJob(work.id, log);
 
     log.info("Starting heartbeat manager...");
     const heartbeatManager = new HeartbeatManager(work.id, log);
@@ -182,7 +196,12 @@ async function main() {
     if (work.sync) {
       if (work.sync.before && work.sync.before.length) {
         for (const syncConfig of work.sync.before) {
-          await downloadSyncConfig(syncConfig, !!work.compression, log);
+          await downloadSyncConfig(
+            work.id,
+            syncConfig,
+            !!work.compression,
+            log
+          );
         }
       }
 
@@ -206,6 +225,7 @@ async function main() {
               ) {
                 filesBeingSynced.add(localFilePath);
                 await uploadFile(
+                  work.id,
                   localFilePath,
                   syncConfig.bucket,
                   syncConfig.prefix + relativeFilename,
@@ -237,6 +257,7 @@ async function main() {
       if (work.input_bucket && work.input_prefix) {
         try {
           await downloadAllFilesFromPrefix({
+            jobId: work.id,
             bucket: work.input_bucket,
             prefix: work.input_prefix,
             outputDir: INPUT_DIR,
@@ -254,6 +275,7 @@ async function main() {
       if (work.checkpoint_bucket && work.checkpoint_prefix) {
         try {
           await downloadAllFilesFromPrefix({
+            jobId: work.id,
             bucket: work.checkpoint_bucket,
             prefix: work.checkpoint_prefix,
             outputDir: CHECKPOINT_DIR,
@@ -276,6 +298,7 @@ async function main() {
             );
             if (eventType === "add" || eventType === "change") {
               await uploadFile(
+                work.id,
                 localFilePath,
                 work.checkpoint_bucket!,
                 work.checkpoint_prefix + relativeFilename,
@@ -310,6 +333,7 @@ async function main() {
             const relativeFilename = path.relative(OUTPUT_DIR, localFilePath);
             if (eventType === "add") {
               await uploadFile(
+                work.id,
                 localFilePath,
                 work.output_bucket!,
                 work.output_prefix + relativeFilename,
@@ -341,6 +365,12 @@ async function main() {
           KELPIE_JOB_ID: work.id,
         }
       );
+      /**
+       * Once the command exits, we can update the job's status in the state.
+       * In the event the exitCode is null, we will default to -2, which is
+       * an error code that is not used by any system commands.
+       */
+      state.jobExited(work.id, exitCode ?? -2, log);
       /**
        * Once the script updates, we can stop watching the directories.
        * This will stop the event-driven file sync behavior that is
@@ -419,7 +449,12 @@ async function main() {
            */
           Promise.all(
             modifiedOutputs.map(async (syncConfig) => {
-              await uploadSyncConfig(syncConfig, !!work.compression, log);
+              await uploadSyncConfig(
+                work.id,
+                syncConfig,
+                !!work.compression,
+                log
+              );
             })
           )
             .then(async () => {

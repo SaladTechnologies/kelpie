@@ -61,6 +61,7 @@ function getDataRatioString(
 }
 
 export async function uploadFile(
+  jobId: string,
   localFilePath: string,
   bucketName: string,
   key: string,
@@ -68,11 +69,11 @@ export async function uploadFile(
   log: Logger
 ): Promise<void> {
   try {
-    if (state.hasUpload(localFilePath)) {
+    if (state.hasUpload(jobId, localFilePath)) {
       log.info(`Upload of ${localFilePath} already in progress`);
       return;
     }
-    await state.startUpload(localFilePath, log);
+    await state.startUpload(jobId, localFilePath, log);
     log.info(`Uploading ${localFilePath} to s3://${bucketName}/${key}`);
     // Create a stream from the local file
     const fileStream = fs.createReadStream(localFilePath);
@@ -122,10 +123,11 @@ export async function uploadFile(
   } catch (err) {
     log.error("Error uploading file: ", err);
   }
-  await state.finishDownload(localFilePath, log);
+  await state.finishDownload(jobId, localFilePath, log);
 }
 
 export async function downloadFile(
+  jobId: string,
   bucketName: string,
   key: string,
   localFilePath: string,
@@ -134,11 +136,11 @@ export async function downloadFile(
 ): Promise<void> {
   try {
     const start = Date.now();
-    if (state.hasDownload(key)) {
+    if (state.hasDownload(jobId, key)) {
       log.info(`Download of ${key} already in progress`);
       return;
     }
-    state.startDownload(localFilePath, log);
+    state.startDownload(jobId, localFilePath, log);
 
     const isGzipped = decompress && key.endsWith(".gz");
     if (isGzipped) {
@@ -165,7 +167,7 @@ export async function downloadFile(
           const unzipStream = createGunzip();
           unzipStream.on("error", async (err) => {
             log.error(`Error decompressing ${key} file: ${err}`);
-            state.finishDownload(localFilePath, log);
+            state.finishDownload(jobId, localFilePath, log);
             reject(err);
           });
           /**
@@ -184,7 +186,7 @@ export async function downloadFile(
           .pipe(writeStream)
           .on("error", (err: any) => {
             log.error(`Error writing to ${localFilePath}: ${err}`);
-            state.finishDownload(localFilePath, log);
+            state.finishDownload(jobId, localFilePath, log);
             reject(err);
           })
           .on("close", () => {
@@ -201,14 +203,14 @@ export async function downloadFile(
               durString = `${(durMs / 60000).toFixed(2)}m`;
             }
             log.info(`${localFilePath} downloaded in ${durString}`);
-            state.finishDownload(localFilePath, log);
+            state.finishDownload(jobId, localFilePath, log);
             resolve();
           });
       }
     });
   } catch (err: any) {
     log.error("Error downloading file: ", err);
-    await state.finishDownload(localFilePath, log);
+    await state.finishDownload(jobId, localFilePath, log);
     throw err;
   }
 }
@@ -247,6 +249,7 @@ async function listAllS3Objects(
 }
 
 async function processBatch(
+  jobId: string,
   batch: string[],
   bucket: string,
   prefix: string,
@@ -259,7 +262,7 @@ async function processBatch(
     const localFilePath = path.join(outputDir, filename);
     const dir = path.dirname(localFilePath);
     await fsPromises.mkdir(dir, { recursive: true });
-    return downloadFile(bucket, key, localFilePath, decompress, log);
+    return downloadFile(jobId, bucket, key, localFilePath, decompress, log);
   });
 
   const results = await Promise.allSettled(downloadPromises);
@@ -280,6 +283,7 @@ async function processBatch(
  * If the `decompress` parameter is set to true, the function will decompress the files
  * while downloading them.
  *
+ * @param options.jobId The ID of the job
  * @param options.bucket The name of the S3 bucket to download from
  * @param options.prefix The prefix of the files to download
  * @param options.outputDir The local directory to download the files to
@@ -289,6 +293,7 @@ async function processBatch(
  * @param options.pattern A regular expression to filter the files to download.
  */
 export async function downloadAllFilesFromPrefix({
+  jobId,
   bucket,
   prefix,
   outputDir,
@@ -297,6 +302,7 @@ export async function downloadAllFilesFromPrefix({
   log,
   pattern,
 }: {
+  jobId: string;
   bucket: string;
   prefix: string;
   outputDir: string;
@@ -319,7 +325,15 @@ export async function downloadAllFilesFromPrefix({
     // Download files in batches
     for (let i = 0; i < allKeys.length; i += batchSize) {
       const batch = allKeys.slice(i, i + batchSize);
-      await processBatch(batch, bucket, prefix, outputDir, decompress, log);
+      await processBatch(
+        jobId,
+        batch,
+        bucket,
+        prefix,
+        outputDir,
+        decompress,
+        log
+      );
     }
 
     log.info(
@@ -349,6 +363,7 @@ export async function downloadAllFilesFromPrefix({
  * @returns
  */
 export async function uploadDirectory({
+  jobId,
   directory,
   bucket,
   prefix,
@@ -357,6 +372,7 @@ export async function uploadDirectory({
   log,
   pattern,
 }: {
+  jobId: string;
   directory: string;
   bucket: string;
   prefix: string;
@@ -383,7 +399,14 @@ export async function uploadDirectory({
         batch.map(async (filePath) => {
           const localFilePath = path.join(directory, filePath);
           const key = prefix + filePath;
-          return await uploadFile(localFilePath, bucket, key, compress, log);
+          return await uploadFile(
+            jobId,
+            localFilePath,
+            bucket,
+            key,
+            compress,
+            log
+          );
         })
       );
     }
@@ -433,6 +456,7 @@ export async function deleteFile(
 }
 
 export async function downloadSyncConfig(
+  jobId: string,
   config: SyncConfig,
   compression: boolean,
   log: Logger
@@ -440,6 +464,7 @@ export async function downloadSyncConfig(
   const { bucket, prefix, local_path, direction, pattern } = config;
   if (direction === "download") {
     await downloadAllFilesFromPrefix({
+      jobId,
       bucket,
       prefix,
       outputDir: local_path,
@@ -452,6 +477,7 @@ export async function downloadSyncConfig(
 }
 
 export async function uploadSyncConfig(
+  jobId: string,
   config: SyncConfig,
   compression: boolean,
   log: Logger
@@ -459,6 +485,7 @@ export async function uploadSyncConfig(
   const { local_path, bucket, prefix, direction, pattern } = config;
   if (direction === "upload") {
     await uploadDirectory({
+      jobId,
       directory: local_path,
       bucket,
       prefix,

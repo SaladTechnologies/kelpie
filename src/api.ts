@@ -3,6 +3,7 @@ import { log as baseLogger } from "./logger";
 import { Logger } from "pino";
 import { Task } from "./types";
 import { SaladCloudImdsSdk } from "@saladtechnologies-oss/salad-cloud-imds-sdk";
+import state from "./state";
 
 let {
   KELPIE_API_URL,
@@ -106,6 +107,7 @@ export async function sendHeartbeat(
 let numFailures = 0;
 export async function reportFailed(jobId: string, log: Logger): Promise<void> {
   log.info(`Reporting job failed`);
+  state.finishJob(jobId, "failed", log);
   await fetchUpToNTimes(
     `${KELPIE_API_URL}/jobs/${jobId}/failed`,
     {
@@ -143,6 +145,7 @@ export async function reportCompleted(
   log: Logger
 ): Promise<void> {
   log.info("Reporting job completed");
+  state.finishJob(jobId, "completed", log);
   await fetchUpToNTimes(
     `${KELPIE_API_URL}/jobs/${jobId}/completed`,
     {
