@@ -124,7 +124,7 @@ export async function uploadFile(
   } catch (err) {
     log.error("Error uploading file: ", err);
   }
-  await state.finishDownload(jobId, localFilePath, log);
+  await state.finishUpload(jobId, localFilePath, log);
   log.debug(state.getJSONState());
 }
 
