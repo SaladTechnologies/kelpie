@@ -1,12 +1,15 @@
 ![](./kelpie.png)
+
 # 🐕 Kelpie (beta)
 
 Kelpie shepherds long-running jobs through to completion on interruptible hardware, coordinating with the [Kelpie API](https://github.com/SaladTechnologies/kelpie-api)
 
 - [🐕 Kelpie (beta)](#-kelpie-beta)
   - [Who is it for?](#who-is-it-for)
+  - [What it is](#what-it-is)
   - [How it Works](#how-it-works)
   - [Adding the kelpie Worker To Your Container Image](#adding-the-kelpie-worker-to-your-container-image)
+  - [Environment Variables](#environment-variables)
   - [Deploying Your Container Group](#deploying-your-container-group)
   - [What it DOES NOT do](#what-it-does-not-do)
   - [API Authorization](#api-authorization)
@@ -28,13 +31,17 @@ Kelpie shepherds long-running jobs through to completion on interruptible hardwa
 Kelpie is for anyone who wants to run long running compute-intensive jobs on [Salad](https://salad.com/), the world's largest distributed GPU cloud. Whether that's [LoRA training](https://blog.salad.com/cost-effective-stable-diffusion-fine-tuning-on-salad/), Monte Carlo simulations, Molecular Dynamics simulations, or anything else, Kelpie can help you run your jobs to completion, even if they take days or weeks.
 You bring your own docker container that contains your script and dependencies, add the Kelpie binary to it, and deploy.
 
-If you'd like to join the Kelpie beta, and are an existing Salad customer, just reach out to your point of contact via email, discord, or slack. If you're interested in Kelpie and are new to Salad, [sign up for a demo](https://salad.com/get-a-demo), and mention you're interested in using Kelpie.
+If you'd like to join the Kelpie beta, and are an existing Salad customer, just reach out to your point of contact via email, discord, or slack. If you're interested in Kelpie and are new to Salad, reach out to support at [cloud@salad.com](cloud@salad.com), and mention you're interested in using Kelpie.
+
+## What it is
+
+Kelpie is a job queue that is particularly focused on the challenges of running extremely long tasks on interruptible hardware. It is designed to be simple to instrument, and to be able to integrate with any containerized workload. It executes scripts in a container according to a job definition, and handles downloading input data, uploading output data, and syncing progress checkpoints to your s3-compatible storage. It also provides a mechanism for scaling your container group in response to job volume.
 
 ## How it Works
 
 ![Kelpie Diagram](./kelpie-architecture.png)
 
-Kelpie is a standalone binary that runs in your container image. It coordinates with the Kelpie API to download your input data, upload your output data, and sync progress checkpoints to your s3-compatible storage. You submit jobs to the [Kelpie API](https://kelpie.saladexamples.com/docs), and those jobs get assigned to salad worker nodes that have the Kelpie binary installed. 
+Kelpie is a standalone binary that runs in your container image. It coordinates with the Kelpie API to download your input data, upload your output data, and sync progress checkpoints to your s3-compatible storage. You submit jobs to the [Kelpie API](https://kelpie.saladexamples.com/docs), and those jobs get assigned to salad worker nodes that have the Kelpie binary installed.
 
 If you define [scaling rules](https://kelpie.saladexamples.com/docs#/default/post_CreateScalingRule), the Kelpie API will handle starting and stopping your container group, and scaling it up and down in response to job volume.
 
@@ -50,7 +57,7 @@ You can find a working example [here](https://github.com/SaladTechnologies/kelpi
 FROM yourimage:yourtag
 
 # Add the kelpie binary to your container image
-ADD https://github.com/SaladTechnologies/kelpie/releases/download/0.4.3/kelpie /kelpie
+ADD https://github.com/SaladTechnologies/kelpie/releases/download/0.5.0/kelpie /kelpie
 RUN chmod +x /kelpie
 
 # Use kelpie as the "main" command. Kelpie will then execute your
@@ -76,9 +83,24 @@ Additionally, your script must support the following things:
 
 Upload your docker image to the container registry of your choice. Salad supports public and private registries, including Docker Hub, AWS ECR, and GitHub Container Registry, among others.
 
+## Environment Variables
+
+| Variable                 | Description                                                                                                  | Default Value              | Required |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------ | -------------------------- | -------- |
+| KELPIE_API_URL           | The URL for the Kelpie API                                                                                   | None                       | Yes      |
+| KELPIE_API_KEY           | The API key for authenticating with the Kelpie API                                                           | None                       | Yes      |
+| SALAD_MACHINE_ID         | The ID of the Salad machine                                                                                  | *set dynamically by Salad* | No       |
+| SALAD_CONTAINER_GROUP_ID | The ID of the Salad container group                                                                          | "" (empty string)          | No       |
+| MAX_RETRIES              | The maximum number of retries for API operations                                                             | "3"                        | No       |
+| MAX_JOB_FAILURES         | The maximum number of job failures allowed before an instance should reallocate.                             | "3"                        | No       |
+| MAX_TIME_WITH_NO_WORK_S  | The maximum time to wait for work before exiting. May be exceeded by up to 10 seconds (1 heartbeat interval) | "0" (Never)               | No       |
+| KELPIE_LOG_LEVEL         | The log level for kelpie                                                                                     | "info"                     | No       |
+
+Additionally, Kelpie will respect AWS environment variables, such as `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, etc. These are used to authenticate with your s3-compatible storage.
+
 ## Deploying Your Container Group
 
-You can deploy your container group using the [Salad API](https://docs.salad.com/api-reference/container_groups/create-a-container-group), or via the [Salad Portal](https://portal.salad.com/). You will need to add the kelpie salad user (currently shawn.rushefsky@salad.com) to your organization to enable the scaling features of kelpie. Kelpie uses the Salad API to start, stop, and scale your container group in response to job volume.
+You can deploy your container group using the [Salad API](https://docs.salad.com/api-reference/container_groups/create-a-container-group), or via the [Salad Portal](https://portal.salad.com/). You will need to add the kelpie salad user (currently <shawn.rushefsky@salad.com>) to your organization to enable the scaling features of kelpie. Kelpie uses the Salad API to start, stop, and scale your container group in response to job volume.
 
 In your container group configuration, you will provide the docker image url, the hardware configuration needed by your job, and the environment variables detailed above. You do not need to enable Container Gateway, or Job Queues, and you do not need to configure probes. While Salad does offer built-in logging, it is still recommended to connect an external logging service for more advanced features.
 
@@ -92,7 +114,8 @@ Once your container group is deployed, and you've verified that the node starts 
 4. kelpie does not create or delete your container groups. If configured with scaling rules, kelpie can start, stop, and scale your container group in response to job volume.
 
 ## API Authorization
-There are live swagger docs that should be considered more accurate and up to date than this readme: https://kelpie.saladexamples.com/docs
+
+There are live swagger docs that should be considered more accurate and up to date than this readme: <https://kelpie.saladexamples.com/docs>
 
 Your kelpie api key is used by you to submit work, and also by kelpie workers to pull and process work.
 
@@ -363,7 +386,6 @@ All query parameters for this endpoint are optional.
   ]
 }
 ```
-
 
 ## Job Lifecycle
 

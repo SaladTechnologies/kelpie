@@ -5,6 +5,7 @@ import {
   HeartbeatManager,
   reportFailed,
   reportCompleted,
+  reallocateMe,
 } from "./api";
 import { DirectoryWatcher, recursivelyClearFilesInDirectory } from "./files";
 import {
@@ -22,16 +23,26 @@ import fs from "fs/promises";
 import { log as baseLogger } from "./logger";
 import { Logger } from "pino";
 import { SyncConfig, Task } from "./types";
+import state from "./state";
 
 const {
   INPUT_DIR = "/input",
   OUTPUT_DIR = "/output",
   CHECKPOINT_DIR = "/checkpoint",
+
+  // Default to 0, which means no timeout
+  MAX_TIME_WITH_NO_WORK_S = "0",
+
+  // There are backend implications to this, so we aren't documenting it yet.
+  HEARTBEAT_INTERVAL_S = "10",
 } = process.env;
 
 mkdirSync(INPUT_DIR, { recursive: true });
 mkdirSync(OUTPUT_DIR, { recursive: true });
 mkdirSync(CHECKPOINT_DIR, { recursive: true });
+
+const maxTimeWithNoWorkMs = parseInt(MAX_TIME_WITH_NO_WORK_S, 10) * 1000;
+const heartbeatIntervalMs = parseInt(HEARTBEAT_INTERVAL_S, 10) * 1000;
 
 const commandExecutor = new CommandExecutor();
 
@@ -53,6 +64,7 @@ async function uploadAndCompleteJob(
 ): Promise<void> {
   try {
     await uploadDirectory({
+      jobId: work.id,
       directory: dirToUpload,
       bucket: work.output_bucket!,
       prefix: work.output_prefix!,
@@ -97,27 +109,74 @@ const filesBeingSynced = new Set();
 
 async function main() {
   baseLogger.info(`Kelpie v${version} started`);
+  await state.saveState(baseLogger);
   await clearAllDirectories(
     Array.from(new Set([INPUT_DIR, OUTPUT_DIR, CHECKPOINT_DIR]))
   );
 
+  let lastWorkReceived = Date.now();
   while (keepAlive) {
     let work;
     try {
       work = await getWork();
     } catch (e: any) {
       baseLogger.error("Error fetching work: ", e);
-      await sleep(10000);
+      await sleep(heartbeatIntervalMs);
       continue;
     }
 
     if (!work) {
+      if (
+        maxTimeWithNoWorkMs > 0 &&
+        Date.now() - lastWorkReceived > maxTimeWithNoWorkMs
+      ) {
+        baseLogger.info(
+          `No work received for ${
+            maxTimeWithNoWorkMs / 1000
+          } seconds, exiting...`
+        );
+        keepAlive = false;
+        /**
+         * A common reason to have no work for too long is that the instance is
+         * banned from a particular workload. In this case, we should reallocate
+         * the instance to get a new machine id. However, we want to make sure any uploads
+         * that are currently in progress complete.
+         */
+        const currentState = state.getState();
+        let uploadsInProgress = false;
+        await Promise.all(
+          currentState.jobs.map(async (job) => {
+            if (job.activeUploads.size) {
+              uploadsInProgress = true;
+              baseLogger.info(
+                `Waiting for uploads to finish before reallocation...`
+              );
+              await state.waitForUploads(job.id, baseLogger);
+            }
+          })
+        );
+
+        if (uploadsInProgress) {
+          /**
+           * If there were uploads in progress, we should check for work one more time
+           */
+          continue;
+        }
+
+        /**
+         * If there are no uploads in progress, we can reallocate the instance.
+         */
+        await reallocateMe(baseLogger);
+        break;
+      }
       baseLogger.info("No work available, sleeping for 10 seconds...");
-      await sleep(10000);
+      await sleep(heartbeatIntervalMs);
       continue;
     }
+    lastWorkReceived = Date.now();
     const log = baseLogger.child({ job_id: work.id });
     log.info(`Received work: ${work.id}`);
+    state.startJob(work.id, log);
 
     log.info("Starting heartbeat manager...");
     const heartbeatManager = new HeartbeatManager(work.id, log);
@@ -137,7 +196,12 @@ async function main() {
     if (work.sync) {
       if (work.sync.before && work.sync.before.length) {
         for (const syncConfig of work.sync.before) {
-          await downloadSyncConfig(syncConfig, !!work.compression, log);
+          await downloadSyncConfig(
+            work.id,
+            syncConfig,
+            !!work.compression,
+            log
+          );
         }
       }
 
@@ -161,6 +225,7 @@ async function main() {
               ) {
                 filesBeingSynced.add(localFilePath);
                 await uploadFile(
+                  work.id,
                   localFilePath,
                   syncConfig.bucket,
                   syncConfig.prefix + relativeFilename,
@@ -187,11 +252,12 @@ async function main() {
           directoryWatchers.push(dirWatcher);
         }
       }
-    } else {
+    } else if (work.input_bucket && work.input_prefix) {
       // Download required files
       if (work.input_bucket && work.input_prefix) {
         try {
           await downloadAllFilesFromPrefix({
+            jobId: work.id,
             bucket: work.input_bucket,
             prefix: work.input_prefix,
             outputDir: INPUT_DIR,
@@ -209,6 +275,7 @@ async function main() {
       if (work.checkpoint_bucket && work.checkpoint_prefix) {
         try {
           await downloadAllFilesFromPrefix({
+            jobId: work.id,
             bucket: work.checkpoint_bucket,
             prefix: work.checkpoint_prefix,
             outputDir: CHECKPOINT_DIR,
@@ -231,6 +298,7 @@ async function main() {
             );
             if (eventType === "add" || eventType === "change") {
               await uploadFile(
+                work.id,
                 localFilePath,
                 work.checkpoint_bucket!,
                 work.checkpoint_prefix + relativeFilename,
@@ -265,6 +333,7 @@ async function main() {
             const relativeFilename = path.relative(OUTPUT_DIR, localFilePath);
             if (eventType === "add") {
               await uploadFile(
+                work.id,
                 localFilePath,
                 work.output_bucket!,
                 work.output_prefix + relativeFilename,
@@ -276,6 +345,8 @@ async function main() {
         );
         directoryWatchers.push(outputWatcher);
       }
+    } else {
+      log.info("No storage configuration provided, skipping file sync");
     }
 
     /**
@@ -285,8 +356,21 @@ async function main() {
       const exitCode = await commandExecutor.execute(
         work.command,
         work.arguments,
-        { ...work.environment, INPUT_DIR, OUTPUT_DIR, CHECKPOINT_DIR }
+        {
+          ...work.environment,
+          INPUT_DIR,
+          OUTPUT_DIR,
+          CHECKPOINT_DIR,
+          KELPIE_STATE_FILE: state.filename,
+          KELPIE_JOB_ID: work.id,
+        }
       );
+      /**
+       * Once the command exits, we can update the job's status in the state.
+       * In the event the exitCode is null, we will default to -2, which is
+       * an error code that is not used by any system commands.
+       */
+      state.jobExited(work.id, exitCode ?? -2, log);
       /**
        * Once the script updates, we can stop watching the directories.
        * This will stop the event-driven file sync behavior that is
@@ -365,7 +449,12 @@ async function main() {
            */
           Promise.all(
             modifiedOutputs.map(async (syncConfig) => {
-              await uploadSyncConfig(syncConfig, !!work.compression, log);
+              await uploadSyncConfig(
+                work.id,
+                syncConfig,
+                !!work.compression,
+                log
+              );
             })
           )
             .then(async () => {
@@ -390,6 +479,12 @@ async function main() {
                 modifiedOutputs.map((syncConfig) => syncConfig.local_path)
               );
             });
+        } else {
+          /**
+           * If there's no IO to process at all, we can just report the job as completed.
+           */
+          await heartbeatManager.stopHeartbeat();
+          await reportCompleted(work.id, log);
         }
       } else {
         await reportFailed(work.id, log);

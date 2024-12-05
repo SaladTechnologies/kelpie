@@ -6,6 +6,7 @@ import {
   DeleteObjectCommand,
 } from "@aws-sdk/client-s3";
 import { Progress, Upload } from "@aws-sdk/lib-storage";
+import { NodeHttpHandler } from "@smithy/node-http-handler";
 import fs from "fs";
 import { Readable } from "stream";
 import path from "path";
@@ -13,10 +14,17 @@ import fsPromises from "fs/promises";
 import { createGzip, createGunzip } from "zlib";
 import { Logger } from "pino";
 import { SyncConfig } from "./types";
+import state from "./state";
 
 const { AWS_REGION, AWS_DEFAULT_REGION } = process.env;
 
-const s3Client = new S3Client({ region: AWS_REGION || AWS_DEFAULT_REGION });
+const s3Client = new S3Client({
+  region: AWS_REGION || AWS_DEFAULT_REGION,
+  requestHandler: new NodeHttpHandler({
+    requestTimeout: 0,
+    connectionTimeout: 10000,
+  }),
+});
 
 function getDataRatioString(
   loaded: number | undefined,
@@ -52,9 +60,8 @@ function getDataRatioString(
   return sizeString;
 }
 
-const ongoingUploads: Set<string> = new Set();
-
 export async function uploadFile(
+  jobId: string,
   localFilePath: string,
   bucketName: string,
   key: string,
@@ -62,11 +69,12 @@ export async function uploadFile(
   log: Logger
 ): Promise<void> {
   try {
-    if (ongoingUploads.has(localFilePath)) {
+    if (state.hasUpload(jobId, localFilePath)) {
       log.info(`Upload of ${localFilePath} already in progress`);
+      log.debug(state.getJSONState());
       return;
     }
-    ongoingUploads.add(localFilePath);
+    await state.startUpload(jobId, localFilePath, log);
     log.info(`Uploading ${localFilePath} to s3://${bucketName}/${key}`);
     // Create a stream from the local file
     const fileStream = fs.createReadStream(localFilePath);
@@ -116,10 +124,12 @@ export async function uploadFile(
   } catch (err) {
     log.error("Error uploading file: ", err);
   }
-  ongoingUploads.delete(localFilePath);
+  await state.finishUpload(jobId, localFilePath, log);
+  log.debug(state.getJSONState());
 }
 
 export async function downloadFile(
+  jobId: string,
   bucketName: string,
   key: string,
   localFilePath: string,
@@ -128,6 +138,11 @@ export async function downloadFile(
 ): Promise<void> {
   try {
     const start = Date.now();
+    if (state.hasDownload(jobId, key)) {
+      log.info(`Download of ${key} already in progress`);
+      return;
+    }
+    state.startDownload(jobId, localFilePath, log);
 
     const isGzipped = decompress && key.endsWith(".gz");
     if (isGzipped) {
@@ -139,24 +154,43 @@ export async function downloadFile(
       Key: key,
     };
 
-    // Perform the download
+    // Get the object from S3, which returns a stream
     const data = await s3Client.send(new GetObjectCommand(downloadParams));
 
     return new Promise((resolve, reject) => {
       if (data.Body instanceof Readable) {
+        /**
+         * S3 gives us a stream back from our request, which can pipe through
+         * the various steps it needs to take to get to the final file.
+         */
         let stream: Readable = data.Body;
         if (isGzipped) {
           log.debug(`Decompressing ${key} file with gunzip`);
           const unzipStream = createGunzip();
-          unzipStream.on("error", (err) => reject(err));
+          unzipStream.on("error", async (err) => {
+            log.error(`Error decompressing ${key} file: ${err}`);
+            state.finishDownload(jobId, localFilePath, log);
+            reject(err);
+          });
+          /**
+           * If we've determined that the file is gzipped, we'll pipe the stream
+           * directly through the gunzip stream to decompress it.
+           */
           stream = stream.pipe(unzipStream);
         }
 
-        // Loop through body chunks and write to file
+        /**
+         * At this point we have a decompressed stream that we can pipe directly
+         * to the file system to write the file.
+         */
         const writeStream = fs.createWriteStream(localFilePath);
         stream
           .pipe(writeStream)
-          .on("error", (err: any) => reject(err))
+          .on("error", (err: any) => {
+            log.error(`Error writing to ${localFilePath}: ${err}`);
+            state.finishDownload(jobId, localFilePath, log);
+            reject(err);
+          })
           .on("close", () => {
             const end = Date.now();
 
@@ -171,12 +205,14 @@ export async function downloadFile(
               durString = `${(durMs / 60000).toFixed(2)}m`;
             }
             log.info(`${localFilePath} downloaded in ${durString}`);
+            state.finishDownload(jobId, localFilePath, log);
             resolve();
           });
       }
     });
   } catch (err: any) {
     log.error("Error downloading file: ", err);
+    await state.finishDownload(jobId, localFilePath, log);
     throw err;
   }
 }
@@ -215,6 +251,7 @@ async function listAllS3Objects(
 }
 
 async function processBatch(
+  jobId: string,
   batch: string[],
   bucket: string,
   prefix: string,
@@ -227,7 +264,7 @@ async function processBatch(
     const localFilePath = path.join(outputDir, filename);
     const dir = path.dirname(localFilePath);
     await fsPromises.mkdir(dir, { recursive: true });
-    return downloadFile(bucket, key, localFilePath, decompress, log);
+    return downloadFile(jobId, bucket, key, localFilePath, decompress, log);
   });
 
   const results = await Promise.allSettled(downloadPromises);
@@ -238,7 +275,27 @@ async function processBatch(
   });
 }
 
+/**
+ * Downloads all files with a given prefix from an S3 bucket to a local directory,
+ * and with an additional regular expression filter.
+ *
+ * This function downloads files in batches to improve performance. The number of files
+ * downloaded in parallel can be controlled with the `batchSize` parameter.
+ *
+ * If the `decompress` parameter is set to true, the function will decompress the files
+ * while downloading them.
+ *
+ * @param options.jobId The ID of the job
+ * @param options.bucket The name of the S3 bucket to download from
+ * @param options.prefix The prefix of the files to download
+ * @param options.outputDir The local directory to download the files to
+ * @param options.batchSize The number of files to download in parallel
+ * @param options.decompress Whether to decompress the files after downloading
+ * @param options.log The logger to use for output
+ * @param options.pattern A regular expression to filter the files to download.
+ */
 export async function downloadAllFilesFromPrefix({
+  jobId,
   bucket,
   prefix,
   outputDir,
@@ -247,6 +304,7 @@ export async function downloadAllFilesFromPrefix({
   log,
   pattern,
 }: {
+  jobId: string;
   bucket: string;
   prefix: string;
   outputDir: string;
@@ -269,7 +327,15 @@ export async function downloadAllFilesFromPrefix({
     // Download files in batches
     for (let i = 0; i < allKeys.length; i += batchSize) {
       const batch = allKeys.slice(i, i + batchSize);
-      await processBatch(batch, bucket, prefix, outputDir, decompress, log);
+      await processBatch(
+        jobId,
+        batch,
+        bucket,
+        prefix,
+        outputDir,
+        decompress,
+        log
+      );
     }
 
     log.info(
@@ -280,7 +346,26 @@ export async function downloadAllFilesFromPrefix({
   }
 }
 
+/**
+ * Uploads all files from a local directory to an S3 bucket with a given prefix.
+ * The function uploads files in batches to improve performance. The number of files
+ * uploaded in parallel can be controlled with the `batchSize` parameter. Files are themselves
+ * uploaded in parallel using the `Upload` class from the `@aws-sdk/lib-storage` package. The
+ * intention is to fully utilize the available bandwidth and improve the overall upload speed.
+ *
+ * If the `compress` parameter is set to true, the function will compress the files
+ * while uploading them.
+ *
+ * The `pattern` parameter can be used to filter the files to upload using a regular
+ * expression.
+ *
+ *
+ *
+ * @param param0
+ * @returns
+ */
 export async function uploadDirectory({
+  jobId,
   directory,
   bucket,
   prefix,
@@ -289,6 +374,7 @@ export async function uploadDirectory({
   log,
   pattern,
 }: {
+  jobId: string;
   directory: string;
   bucket: string;
   prefix: string;
@@ -304,6 +390,10 @@ export async function uploadDirectory({
       log.info(`Filtering files with pattern: ${pattern}`);
       fileList = fileList.filter((key) => pattern.test(key));
     }
+    if (fileList.length === 0) {
+      log.info("No files found to upload");
+      return;
+    }
     log.info(`Found ${fileList.length} files to upload`);
     for (let i = 0; i < fileList.length; i += batchSize) {
       const batch = fileList.slice(i, i + batchSize);
@@ -311,7 +401,14 @@ export async function uploadDirectory({
         batch.map(async (filePath) => {
           const localFilePath = path.join(directory, filePath);
           const key = prefix + filePath;
-          return await uploadFile(localFilePath, bucket, key, compress, log);
+          return await uploadFile(
+            jobId,
+            localFilePath,
+            bucket,
+            key,
+            compress,
+            log
+          );
         })
       );
     }
@@ -361,6 +458,7 @@ export async function deleteFile(
 }
 
 export async function downloadSyncConfig(
+  jobId: string,
   config: SyncConfig,
   compression: boolean,
   log: Logger
@@ -368,6 +466,7 @@ export async function downloadSyncConfig(
   const { bucket, prefix, local_path, direction, pattern } = config;
   if (direction === "download") {
     await downloadAllFilesFromPrefix({
+      jobId,
       bucket,
       prefix,
       outputDir: local_path,
@@ -380,6 +479,7 @@ export async function downloadSyncConfig(
 }
 
 export async function uploadSyncConfig(
+  jobId: string,
   config: SyncConfig,
   compression: boolean,
   log: Logger
@@ -387,6 +487,7 @@ export async function uploadSyncConfig(
   const { local_path, bucket, prefix, direction, pattern } = config;
   if (direction === "upload") {
     await uploadDirectory({
+      jobId,
       directory: local_path,
       bucket,
       prefix,

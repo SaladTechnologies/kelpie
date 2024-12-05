@@ -2,6 +2,8 @@ import assert from "assert";
 import { log as baseLogger } from "./logger";
 import { Logger } from "pino";
 import { Task } from "./types";
+import { SaladCloudImdsSdk } from "@saladtechnologies-oss/salad-cloud-imds-sdk";
+import state from "./state";
 
 let {
   KELPIE_API_URL,
@@ -9,6 +11,7 @@ let {
   SALAD_MACHINE_ID = "",
   SALAD_CONTAINER_GROUP_ID = "",
   MAX_RETRIES = "3",
+  MAX_JOB_FAILURES = "5",
 } = process.env;
 
 assert(KELPIE_API_URL, "KELPIE_API_URL is required");
@@ -19,11 +22,14 @@ if (KELPIE_API_URL.endsWith("/")) {
 }
 
 const maxRetries = parseInt(MAX_RETRIES, 10);
+const maxJobFailures = parseInt(MAX_JOB_FAILURES, 10);
 
 const headers = {
   "Content-Type": "application/json",
   "X-Kelpie-Key": KELPIE_API_KEY,
 };
+
+const imds = new SaladCloudImdsSdk({});
 
 async function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -98,8 +104,10 @@ export async function sendHeartbeat(
   return { status };
 }
 
+let numFailures = 0;
 export async function reportFailed(jobId: string, log: Logger): Promise<void> {
   log.info(`Reporting job failed`);
+  state.finishJob(jobId, "failed", log);
   await fetchUpToNTimes(
     `${KELPIE_API_URL}/jobs/${jobId}/failed`,
     {
@@ -113,6 +121,23 @@ export async function reportFailed(jobId: string, log: Logger): Promise<void> {
     maxRetries,
     log
   );
+  numFailures++;
+  if (numFailures >= maxJobFailures) {
+    await reallocateMe(log);
+  }
+}
+
+export async function reallocateMe(log: Logger): Promise<void> {
+  try {
+    log.info("Reallocating container via IMDS");
+    await imds.metadata.reallocateContainer({
+      reason: "Kelpie: Max Job Failures Exceeded",
+    });
+  } catch (e: any) {
+    log.error(`Failed to reallocate container via IMDS: ${e.message}`);
+    log.error("Exiting process");
+    process.exit(1);
+  }
 }
 
 export async function reportCompleted(
@@ -120,6 +145,7 @@ export async function reportCompleted(
   log: Logger
 ): Promise<void> {
   log.info("Reporting job completed");
+  state.finishJob(jobId, "completed", log);
   await fetchUpToNTimes(
     `${KELPIE_API_URL}/jobs/${jobId}/completed`,
     {
