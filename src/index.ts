@@ -479,6 +479,12 @@ async function main() {
                 modifiedOutputs.map((syncConfig) => syncConfig.local_path)
               );
             });
+        } else {
+          /**
+           * If there's no IO to process at all, we can just report the job as completed.
+           */
+          await heartbeatManager.stopHeartbeat();
+          await reportCompleted(work.id, log);
         }
       } else {
         await reportFailed(work.id, log);
