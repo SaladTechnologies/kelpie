@@ -200,7 +200,7 @@ async function main() {
     const handleError = async (e: any) => {
       /**
        * This occurs if a heartbeat fails config.maxRetries times, meaning the machine
-       * has lost communication with kelpie
+       * has lost communication with kelpie api
        *  */
       log.error(`Heartbeat error: ${e.message}`);
 
