@@ -74,7 +74,7 @@ CMD ["/kelpie"]
 
 When running the image, you will need additional configuration in the environment:
 
-- AWS/Cloudflare Credentials: Provide `AWS_ACCESS_KEY_ID`, etc to enable the kelpie worker to upload and download from your bucket storage. We use the s3 compatability api, so any s3-compatible storage should work.
+- AWS/Cloudflare Credentials: Provide `AWS_ACCESS_KEY_ID`, etc to enable the kelpie worker to upload and download from your bucket storage. We use the s3 compatibility api, so any s3-compatible storage should work.
 - `KELPIE_API_URL`: the root URL for the coordination API, e.g. kelpie.saladexamples.com
 - `KELPIE_API_KEY`: Your api key for the coordination API, issued by Salad for use with kelpie. NOT your Salad API Key.
 
@@ -108,7 +108,7 @@ This is optional, and only required if you want to use Kelpie's autoscaling feat
 Kelpie uses the Salad API to [start](https://docs.salad.com/reference/saladcloud-api/container_groups/start-a-container-group), [stop](https://docs.salad.com/reference/saladcloud-api/container_groups/stop-a-container-group), and [scale](https://docs.salad.com/reference/saladcloud-api/container_groups/update-a-container-group) your container group in response to job volume.
 
 In your container group configuration, you will provide the docker image url, the hardware configuration needed by your job, and the environment variables detailed above.
-You do not need to enable Container Gateway, or Job Queues, and you do not need to configure probes. 
+You do not need to enable Container Gateway, or Job Queues, and you do not need to configure probes.
 While Salad does offer built-in logging, it is still recommended to connect an [external logging service](https://docs.salad.com/products/sce/container-groups/external-logging/external-logging) for more advanced features.
 
 Once your container group is deployed, and you've verified that the node starts and runs successfully, you'll want to retrieve the container group ID from the [Salad API](https://docs.salad.com/api-reference/container_groups/get-a-container-group). You will use this ID when submitting jobs to the Kelpie API.

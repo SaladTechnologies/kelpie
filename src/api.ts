@@ -123,15 +123,15 @@ export async function reportFailed(jobId: string, log: Logger): Promise<void> {
   );
   numFailures++;
   if (numFailures >= maxJobFailures) {
-    await reallocateMe(log);
+    await reallocateMe("Kelpie: Max Job Failures Exceeded", log);
   }
 }
 
-export async function reallocateMe(log: Logger): Promise<void> {
+export async function reallocateMe(reason: string, log: Logger): Promise<void> {
   try {
     log.info("Reallocating container via IMDS");
     await imds.metadata.reallocateContainer({
-      reason: "Kelpie: Max Job Failures Exceeded",
+      reason,
     });
   } catch (e: any) {
     log.error(`Failed to reallocate container via IMDS: ${e.message}`);
