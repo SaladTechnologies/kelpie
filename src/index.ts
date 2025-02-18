@@ -190,37 +190,38 @@ async function main() {
      * The heartbeat endpoint may return a status of "canceled" if the job has been cancelled,
      * in which case we should stop the job and ask for a new one.
      */
-    async function onJobCancel() {
+    const onJobCancel = async () => {
       await Promise.all(
         directoryWatchers.map((watcher) => watcher.stopWatching())
       );
       commandExecutor.interrupt();
-    }
+    };
+
+    const handleError = async (e: any) => {
+      /**
+       * This occurs if a heartbeat fails config.maxRetries times, meaning the machine
+       * has lost communication with kelpie
+       *  */
+      log.error(`Heartbeat error: ${e.message}`);
+
+      /**
+       * If the heartbeat throws an error, we should restart it.
+       * This is because the error is likely due to a network issue which
+       * may be transient, and the job is still running. This way,
+       * the job can continue to run and the heartbeat will be re-established.
+       *
+       * The alternative is to abort the job or reallocate the instance, but this is
+       * not ideal because the job is still running and may complete successfully.
+       */
+      await heartbeatManager.stopHeartbeat();
+      await heartbeatManager
+        .startHeartbeat(work.heartbeat_interval, onJobCancel)
+        .catch(handleError);
+    };
 
     heartbeatManager
       .startHeartbeat(work.heartbeat_interval, onJobCancel)
-      .catch(async (e: any) => {
-        /**
-         * This occurs if a heartbeat fails config.maxRetries times, meaning the machine
-         * has lost communication with kelpie
-         *  */
-        log.error(`Heartbeat error: ${e.message}`);
-
-        /**
-         * If the heartbeat throws an error, we should restart it.
-         * This is because the error is likely due to a network issue which
-         * may be transient, and the job is still running. This way,
-         * the job can continue to run and the heartbeat will be re-established.
-         *
-         * The alternative is to abort the job or reallocate the instance, but this is
-         * not ideal because the job is still running and may complete successfully.
-         */
-        await heartbeatManager.stopHeartbeat();
-        await heartbeatManager.startHeartbeat(
-          work.heartbeat_interval,
-          onJobCancel
-        );
-      });
+      .catch(handleError);
 
     /**
      * This block is event-driven, triggered by file changes in configured directories.
