@@ -197,7 +197,7 @@ async function main() {
       commandExecutor.interrupt();
     };
 
-    const handleError = async (e: any) => {
+    const handleHeartbeatError = async (e: any) => {
       /**
        * This occurs if a heartbeat fails config.maxRetries times, meaning the machine
        * has lost communication with kelpie api
@@ -216,12 +216,12 @@ async function main() {
       await heartbeatManager.stopHeartbeat();
       await heartbeatManager
         .startHeartbeat(work.heartbeat_interval, onJobCancel)
-        .catch(handleError);
+        .catch(handleHeartbeatError);
     };
 
     heartbeatManager
       .startHeartbeat(work.heartbeat_interval, onJobCancel)
-      .catch(handleError);
+      .catch(handleHeartbeatError);
 
     /**
      * This block is event-driven, triggered by file changes in configured directories.
