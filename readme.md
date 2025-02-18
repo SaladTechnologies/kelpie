@@ -28,20 +28,26 @@ Kelpie shepherds long-running jobs through to completion on interruptible hardwa
 
 ## Who is it for?
 
-Kelpie is for anyone who wants to run long running compute-intensive jobs on [Salad](https://salad.com/), the world's largest distributed GPU cloud. Whether that's [LoRA training](https://blog.salad.com/cost-effective-stable-diffusion-fine-tuning-on-salad/), Monte Carlo simulations, Molecular Dynamics simulations, or anything else, Kelpie can help you run your jobs to completion, even if they take days or weeks.
+Kelpie is for anyone who wants to run long running compute-intensive jobs on [Salad](https://salad.com/), the world's largest distributed GPU cloud.
+Whether that's [LoRA training](https://blog.salad.com/cost-effective-stable-diffusion-fine-tuning-on-salad/), Monte Carlo simulations, Molecular Dynamics simulations, or anything else, Kelpie can help you run your jobs to completion, even if they take days or weeks.
 You bring your own docker container that contains your script and dependencies, add the Kelpie binary to it, and deploy.
 
-If you'd like to join the Kelpie beta, and are an existing Salad customer, just reach out to your point of contact via email, discord, or slack. If you're interested in Kelpie and are new to Salad, reach out to support at [cloud@salad.com](cloud@salad.com), and mention you're interested in using Kelpie.
+If you'd like to join the Kelpie beta, and are an existing Salad customer, just reach out to your point of contact via email, discord, or slack.
+If you're interested in Kelpie and are new to Salad, reach out to support at [cloud@salad.com](cloud@salad.com), and mention you're interested in using Kelpie.
 
 ## What it is
 
-Kelpie is a job queue that is particularly focused on the challenges of running extremely long tasks on interruptible hardware. It is designed to be simple to instrument, and to be able to integrate with any containerized workload. It executes scripts in a container according to a job definition, and handles downloading input data, uploading output data, and syncing progress checkpoints to your s3-compatible storage. It also provides a mechanism for scaling your container group in response to job volume.
+Kelpie is a job queue that is particularly focused on the challenges of running extremely long tasks on interruptible hardware. It is designed to be simple to instrument, and to be able to integrate with any containerized workload.
+It executes scripts in a container according to a job definition, and *optionally* handles downloading input data, uploading output data, and syncing progress checkpoints to your s3-compatible storage.
+It also provides a mechanism for scaling your container group in response to job volume.
 
 ## How it Works
 
 ![Kelpie Diagram](./kelpie-architecture.png)
 
-Kelpie is a standalone binary that runs in your container image. It coordinates with the Kelpie API to download your input data, upload your output data, and sync progress checkpoints to your s3-compatible storage. You submit jobs to the [Kelpie API](https://kelpie.saladexamples.com/docs), and those jobs get assigned to salad worker nodes that have the Kelpie binary installed.
+Kelpie is a standalone binary that runs in your container image.
+It coordinates with the Kelpie API to download your input data, upload your output data, and sync progress checkpoints to your s3-compatible storage.
+You submit jobs to the [Kelpie API](https://kelpie.saladexamples.com/docs), and those jobs get assigned to salad worker nodes that have the Kelpie binary installed.
 
 If you define [scaling rules](https://kelpie.saladexamples.com/docs#/default/post_CreateScalingRule), the Kelpie API will handle starting and stopping your container group, and scaling it up and down in response to job volume.
 
@@ -74,12 +80,8 @@ When running the image, you will need additional configuration in the environmen
 
 Additionally, your script must support the following things:
 
-- Saving and Resuming From Checkpoints: Your script should periodically output progress checkpoints to `CHECKPOINT_DIR`, so that the job can be resumed if it gets interrupted. Similarly, when your script starts, it should check `CHECKPOINT_DIR` to see if there is anything to resume, and only start from the beginning if no checkpoint is present.
-- It must exit "successfully" with an exit code of 0 upon completion.
-- (Deprecated) Environment variables - If these are set by you in your container group configuration, they will be respected, otherwise they will be set by kelpie. This functionality has been replaced by the `sync` block in the job definition.
-  - `INPUT_DIR`: Where to look for whatever data is needed as input. This will be downloaded from your bucket storage by kelpie prior to running the script.
-  - `CHECKPOINT_DIR`: This is where to save progress checkpoints locally. kelpie will handle syncing the contents to your bucket storage, and will make sure any existing checkpoint is downloaded prior to running the script.
-  - `OUTPUT_DIR`: This is where to save any output artifacts. kelpie will upload your artifacts to your bucket storage.
+- Saving and Resuming From Checkpoints: Your script should periodically output progress checkpoints, so the job can be resumed with minimal loss in the case of interruption.
+- It must exit "successfully" with an exit code of 0 upon completion
 
 Upload your docker image to the container registry of your choice. Salad supports public and private registries, including Docker Hub, AWS ECR, and GitHub Container Registry, among others.
 
@@ -90,19 +92,24 @@ Upload your docker image to the container registry of your choice. Salad support
 | KELPIE_API_URL           | The URL for the Kelpie API                                                                                   | None                       | Yes      |
 | KELPIE_API_KEY           | The API key for authenticating with the Kelpie API                                                           | None                       | Yes      |
 | SALAD_MACHINE_ID         | The ID of the Salad machine                                                                                  | *set dynamically by Salad* | No       |
-| SALAD_CONTAINER_GROUP_ID | The ID of the Salad container group                                                                          | "" (empty string)          | No       |
+| SALAD_CONTAINER_GROUP_ID | The ID of the Salad container group                                                                          | *set dynamically by Salad* | No       |
 | MAX_RETRIES              | The maximum number of retries for API operations                                                             | "3"                        | No       |
 | MAX_JOB_FAILURES         | The maximum number of job failures allowed before an instance should reallocate.                             | "3"                        | No       |
-| MAX_TIME_WITH_NO_WORK_S  | The maximum time to wait for work before exiting. May be exceeded by up to 10 seconds (1 heartbeat interval) | "0" (Never)               | No       |
+| MAX_TIME_WITH_NO_WORK_S  | The maximum time to wait for work before exiting. May be exceeded by up to 10 seconds (1 heartbeat interval) | "0" (Never)                | No       |
 | KELPIE_LOG_LEVEL         | The log level for kelpie                                                                                     | "info"                     | No       |
 
 Additionally, Kelpie will respect AWS environment variables, such as `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, etc. These are used to authenticate with your s3-compatible storage.
 
 ## Deploying Your Container Group
 
-You can deploy your container group using the [Salad API](https://docs.salad.com/api-reference/container_groups/create-a-container-group), or via the [Salad Portal](https://portal.salad.com/). You will need to add the kelpie salad user (currently <shawn.rushefsky@salad.com>) to your organization to enable the scaling features of kelpie. Kelpie uses the Salad API to start, stop, and scale your container group in response to job volume.
+You can deploy your container group using the [Salad API](https://docs.salad.com/api-reference/container_groups/create-a-container-group), or via the [Salad Portal](https://portal.salad.com/).
+You will need to add the kelpie salad user (currently <shawn.rushefsky@salad.com>) to your organization to enable the scaling features of kelpie.
+This is optional, and only required if you want to use Kelpie's autoscaling features.
+Kelpie uses the Salad API to [start](https://docs.salad.com/reference/saladcloud-api/container_groups/start-a-container-group), [stop](https://docs.salad.com/reference/saladcloud-api/container_groups/stop-a-container-group), and [scale](https://docs.salad.com/reference/saladcloud-api/container_groups/update-a-container-group) your container group in response to job volume.
 
-In your container group configuration, you will provide the docker image url, the hardware configuration needed by your job, and the environment variables detailed above. You do not need to enable Container Gateway, or Job Queues, and you do not need to configure probes. While Salad does offer built-in logging, it is still recommended to connect an external logging service for more advanced features.
+In your container group configuration, you will provide the docker image url, the hardware configuration needed by your job, and the environment variables detailed above.
+You do not need to enable Container Gateway, or Job Queues, and you do not need to configure probes. 
+While Salad does offer built-in logging, it is still recommended to connect an [external logging service](https://docs.salad.com/products/sce/container-groups/external-logging/external-logging) for more advanced features.
 
 Once your container group is deployed, and you've verified that the node starts and runs successfully, you'll want to retrieve the container group ID from the [Salad API](https://docs.salad.com/api-reference/container_groups/get-a-container-group). You will use this ID when submitting jobs to the Kelpie API.
 
@@ -129,7 +136,11 @@ All API requests should use a base url of `https://kelpie.saladexamples.com`.
 
 ## Queueing a job
 
-Queueing a job for processing is a post request to the Kelpie API. You must provide a command to run, and optionally arguments, environment variables, and sync instructions. A job must also be assigned to a specific container group, using the container group id. You can get your container group id from the [Salad API.](https://docs.salad.com/api-reference/container_groups/get-a-container-group). You can optionally provide a webhook url to receive status updates about your job.
+Queueing a job for processing is a post request to the Kelpie API.
+You must provide a command to run, and optionally arguments, environment variables, and sync instructions.
+A job must also be assigned to a specific container group, using the container group id.
+You can get your container group id from the [Salad API.](https://docs.salad.com/api-reference/container_groups/get-a-container-group).
+You can optionally provide a webhook url to receive status updates about your job.
 
 ### `POST /jobs`
 
@@ -250,7 +261,8 @@ You can cancel a job using the job id
 
 ## Checking on a job
 
-As mentioned above, Kelpie does not monitor the progress of your job, but it does track the status (pending, running, canceled, completed, failed). You can get a job using the job id:
+As mentioned above, Kelpie does not monitor the progress of your job, but it does track the status (pending, running, canceled, completed, failed).
+You can get a job using the job id:
 
 ### `GET /jobs/:id`
 
@@ -389,15 +401,15 @@ All query parameters for this endpoint are optional.
 
 ## Job Lifecycle
 
-1. When kelpie starts on a new node, it starts polling for available work from `/work`. In these requests, it includes some information about what salad node you're on, including the machine id and container group id. This ensures we only hand out work to the correct container group, and that we do not hand out to a machine where that job has previously failed.
+1. When kelpie starts on a new node, it starts polling for available work from `/work` at the Kelpie API. In these requests, it includes some information about what salad node you're on, including the machine id and container group id. This ensures we only hand out work to the correct container group, and that we do not hand out to a machine where that job has previously failed.
 2. When a job is started, a webhook is sent, if configured.
-3. Once it receives a job, kelpie downloads your inputs, and your checkpoint
+3. Once it receives a job, kelpie downloads everything in `.sync.before`.
 4. Once required files are downloaded, kelpie executes your command with the provided arguments, adding environment variables as documented above.
-5. Whenever files are added to the checkpoint directory, kelpie syncs the directory to the checkpoint bucket and prefix.
-6. Whenever files are added to the output directory, kelpie syncs the directory to the output bucket and prefix.
+5. While the job is running, whenever files are added to the a directory specified in `.sync.during`, kelpie will upload them to the configured bucket and prefix, with their filename as the last part of the key.
+6. After the job is complete, all paths defined in `.sync.after` will be uploaded.
 7. When your command exits 0, the job is marked as complete, and a webhook is sent (if configured) to notify you about the job's completion.
-   1. If your job fails, meaning exits non-0, it will be reported as a failure to the api. When this occurs, the number of failures for the job is incremented, up to 3. The machine id reporting the failure will be blocked from receiving that job again. If the job fails 3 times, it is marked failed, and a webhook is sent, if configured. If a machine id is blocked from 5 jobs, the container will be reallocated to a different machine, provided you have added the kelpie user to your salad org.
-8. input, checkpoint, and output directories are purged, and the cycle begins again
+   1. If your job fails, meaning exits non-0, it will be reported as a failure to the api. When this occurs, the number of failures for the job is incremented, up to 3. The machine id reporting the failure will be blocked from receiving that job again. If the job fails 3 times, it is marked failed, and a webhook is sent, if configured. If a machine id is blocked from 3 jobs, the container will be reallocated to a different machine, provided you have added the kelpie user to your salad org.
+8. Any directories specified in `.sync` and purged to reset the environment.
 
 ## Status Webhooks
 
