@@ -87,16 +87,17 @@ Upload your docker image to the container registry of your choice. Salad support
 
 ## Environment Variables
 
-| Variable                 | Description                                                                                                  | Default Value              | Required |
-| ------------------------ | ------------------------------------------------------------------------------------------------------------ | -------------------------- | -------- |
-| KELPIE_API_URL           | The URL for the Kelpie API                                                                                   | None                       | Yes      |
-| KELPIE_API_KEY           | The API key for authenticating with the Kelpie API                                                           | None                       | Yes      |
-| SALAD_MACHINE_ID         | The ID of the Salad machine                                                                                  | *set dynamically by Salad* | No       |
-| SALAD_CONTAINER_GROUP_ID | The ID of the Salad container group                                                                          | *set dynamically by Salad* | No       |
-| MAX_RETRIES              | The maximum number of retries for API operations                                                             | "3"                        | No       |
-| MAX_JOB_FAILURES         | The maximum number of job failures allowed before an instance should reallocate.                             | "3"                        | No       |
-| MAX_TIME_WITH_NO_WORK_S  | The maximum time to wait for work before exiting. May be exceeded by up to 10 seconds (1 heartbeat interval) | "0" (Never)                | No       |
-| KELPIE_LOG_LEVEL         | The log level for kelpie                                                                                     | "info"                     | No       |
+| Variable                     | Description                                                                                                                                                                                                               | Default Value              | Required |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------- | -------- |
+| KELPIE_API_URL               | The URL for the Kelpie API                                                                                                                                                                                                | None                       | Yes      |
+| KELPIE_API_KEY               | The API key for authenticating with the Kelpie API                                                                                                                                                                        | None                       | Yes      |
+| SALAD_MACHINE_ID             | The ID of the Salad machine                                                                                                                                                                                               | *set dynamically by Salad* | No       |
+| SALAD_CONTAINER_GROUP_ID     | The ID of the Salad container group                                                                                                                                                                                       | *set dynamically by Salad* | No       |
+| MAX_RETRIES                  | The maximum number of retries for API operations                                                                                                                                                                          | "3"                        | No       |
+| MAX_JOB_FAILURES             | The maximum number of job failures allowed before an instance should reallocate.                                                                                                                                          | "3"                        | No       |
+| MAX_TIME_WITH_NO_WORK_S      | The maximum time to wait for work before exiting. May be exceeded by up to 10 seconds (1 heartbeat interval)                                                                                                              | "0" (Never)                | No       |
+| KELPIE_LOG_LEVEL             | The log level for kelpie                                                                                                                                                                                                  | "info"                     | No       |
+| KELPIE_RECREATE_BETWEEN_JOBS | Whether to recreate the environment between jobs, by deleting and recreating the container. This is useful for ensuring a clean environment, but may increase job startup time, and lead to idle GPU time during uploads. | "false"                    | No       |
 
 Additionally, Kelpie will respect AWS environment variables, such as `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, etc. These are used to authenticate with your s3-compatible storage.
 

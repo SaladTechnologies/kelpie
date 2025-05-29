@@ -587,6 +587,14 @@ async function main() {
     dirsToClear = Array.from(new Set(dirsToClear));
 
     await clearAllDirectories(dirsToClear);
+
+    if (recreateBetweenJobs) {
+      await state.waitForUploads(work.id, baseLogger);
+      baseLogger.info("Recreating container between jobs...");
+      await recreateMe(baseLogger);
+      await sleep(1000); // Give some time for the container to be recreated
+      break;
+    }
   }
 }
 
