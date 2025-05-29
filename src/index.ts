@@ -6,6 +6,8 @@ import {
   reportFailed,
   reportCompleted,
   reallocateMe,
+  recreateMe,
+  setDeletionCost,
 } from "./api";
 import { DirectoryWatcher, recursivelyClearFilesInDirectory } from "./files";
 import {
@@ -35,6 +37,8 @@ const {
 
   // There are backend implications to this, so we aren't documenting it yet.
   HEARTBEAT_INTERVAL_S = "10",
+
+  KELPIE_RECREATE_BETWEEN_JOBS = "false",
 } = process.env;
 
 mkdirSync(INPUT_DIR, { recursive: true });
@@ -43,6 +47,7 @@ mkdirSync(CHECKPOINT_DIR, { recursive: true });
 
 const maxTimeWithNoWorkMs = parseInt(MAX_TIME_WITH_NO_WORK_S, 10) * 1000;
 const heartbeatIntervalMs = parseInt(HEARTBEAT_INTERVAL_S, 10) * 1000;
+const recreateBetweenJobs = KELPIE_RECREATE_BETWEEN_JOBS === "true";
 
 const commandExecutor = new CommandExecutor();
 
@@ -62,7 +67,10 @@ async function uploadAndCompleteJob(
   heartbeatManager: HeartbeatManager,
   log: Logger
 ): Promise<void> {
+  state.getState().isUploadingFinalArtifacts++;
+  log.info(`Uploading output directory: ${dirToUpload}`);
   try {
+    await setDeletionCost(999999999, log); // Increase deletion cost to prevent instance from being deleted while uploading
     await uploadDirectory({
       jobId: work.id,
       directory: dirToUpload,
@@ -75,13 +83,18 @@ async function uploadAndCompleteJob(
   } catch (e: any) {
     log.error(`Error uploading output directory: ${e.message}`);
     await reportFailed(work.id, log);
+    state.getState().isUploadingFinalArtifacts--;
+    await heartbeatManager.stopHeartbeat();
     return;
   }
 
   try {
     await reportCompleted(work.id, log);
+    state.getState().isUploadingFinalArtifacts--;
   } catch (e: any) {
     log.error(`Error reporting job completion: ${e.message}`);
+    state.getState().isUploadingFinalArtifacts--;
+    await heartbeatManager.stopHeartbeat();
     return;
   }
 
@@ -89,7 +102,6 @@ async function uploadAndCompleteJob(
     `Output directory uploaded and job completed. Removing ${dirToUpload}...`
   );
   await fs.rmdir(dirToUpload, { recursive: true });
-
   await heartbeatManager.stopHeartbeat();
 }
 
@@ -173,6 +185,10 @@ async function main() {
         break;
       }
       baseLogger.info("No work available, sleeping for 10 seconds...");
+      if (state.getState().isUploadingFinalArtifacts === 0) {
+        // If no uploads are in progress, we can reset the deletion cost
+        await setDeletionCost(0, baseLogger);
+      }
       await sleep(heartbeatIntervalMs);
       continue;
     }
@@ -180,6 +196,9 @@ async function main() {
     const log = baseLogger.child({ job_id: work.id });
     log.info(`Received work: ${work.id}`);
     state.startJob(work.id, log);
+    if (state.getState().isUploadingFinalArtifacts === 0) {
+      await setDeletionCost(1, log);
+    }
 
     log.info("Starting heartbeat manager...");
     const heartbeatManager = new HeartbeatManager(work.id, log);
@@ -380,6 +399,9 @@ async function main() {
       }
     } else {
       log.info("No storage configuration provided, skipping file sync");
+    }
+    if (state.getState().isUploadingFinalArtifacts === 0) {
+      await setDeletionCost(2, log);
     }
 
     /**

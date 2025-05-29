@@ -130,7 +130,7 @@ export async function reportFailed(jobId: string, log: Logger): Promise<void> {
 export async function reallocateMe(reason: string, log: Logger): Promise<void> {
   try {
     log.info("Reallocating container via IMDS");
-    await imds.metadata.reallocateContainer({
+    await imds.metadata.reallocate({
       reason,
     });
   } catch (e: any) {
@@ -166,6 +166,7 @@ export class HeartbeatManager {
   private jobId: string;
   private waiter: Promise<void> | null = null;
   private log: Logger;
+  private numHeartbeats: number = 0;
 
   constructor(jobId: string, log: Logger) {
     this.log = log;
@@ -181,11 +182,15 @@ export class HeartbeatManager {
     this.log.info("Heartbeat started.");
 
     while (this.active) {
-      const { status } = await sendHeartbeat(this.jobId, this.log); // Call your sendHeartbeat function
+      const { status } = await sendHeartbeat(this.jobId, this.log);
+      this.numHeartbeats++;
       if (status === "canceled") {
         this.log.info("Job was canceled, stopping heartbeat.");
         await onCanceled();
         break;
+      }
+      if (state.getState().isUploadingFinalArtifacts === 0) {
+        await setDeletionCost(this.numHeartbeats + 2, this.log);
       }
       this.waiter = sleep(interval_s * 1000);
       await this.waiter; // Wait for 30 seconds before the next heartbeat
@@ -202,5 +207,22 @@ export class HeartbeatManager {
       await this.waiter; // Wait for the last heartbeat to complete
       this.waiter = null;
     }
+  }
+}
+
+export async function setDeletionCost(
+  cost: number,
+  log: Logger
+): Promise<void> {
+  log.info(`Setting deletion cost to ${cost}`);
+  await imds.metadata.replaceDeletionCost({ deletionCost: cost });
+}
+
+export async function recreateMe(log: Logger): Promise<void> {
+  log.info("Recreating container via IMDS");
+  try {
+    await imds.metadata.recreate();
+  } catch (e: any) {
+    log.error(`Failed to recreate container via IMDS: ${e.message}`);
   }
 }

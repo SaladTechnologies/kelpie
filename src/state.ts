@@ -20,6 +20,7 @@ export type JobState = {
 const state = {
   start: new Date().toISOString(),
   jobs: [] as JobState[],
+  isUploadingFinalArtifacts: 0,
 };
 
 export async function startDownload(
