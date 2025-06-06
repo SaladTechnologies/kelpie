@@ -40,8 +40,7 @@ Kelpie is for anyone who wants to run long running compute-intensive jobs on [Sa
 Whether that's [LoRA training](https://blog.salad.com/cost-effective-stable-diffusion-fine-tuning-on-salad/), Monte Carlo simulations, Molecular Dynamics simulations, or anything else, Kelpie can help you run your jobs to completion, even if they take days or weeks.
 You bring your own docker container that contains your script and dependencies, add the Kelpie binary to it, and deploy.
 
-If you'd like to join the Kelpie beta, and are an existing Salad customer, just reach out to your point of contact via email, discord, or slack.
-If you're interested in Kelpie and are new to Salad, reach out to support at [cloud@salad.com](cloud@salad.com), and mention you're interested in using Kelpie.
+If you'd like to use Kelpie, you can use your Salad API key to authenticate with the Kelpie API, and the worker binary will use the Salad Instance Metadata Service (IMDS) to authenticate itself to the Kelpie API.
 
 ## What it is
 
