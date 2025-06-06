@@ -6,7 +6,7 @@ import { SaladCloudImdsSdk } from "@saladtechnologies-oss/salad-cloud-imds-sdk";
 import state from "./state";
 
 let {
-  KELPIE_API_URL,
+  KELPIE_API_URL = "https://kelpie.saladexamples.com",
   KELPIE_API_KEY,
   SALAD_API_KEY,
   SALAD_PROJECT,
