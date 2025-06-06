@@ -215,7 +215,22 @@ export async function setDeletionCost(
   log: Logger
 ): Promise<void> {
   log.info(`Setting deletion cost to ${cost}`);
-  await imds.metadata.replaceDeletionCost({ deletionCost: cost });
+  try {
+    const resp = await fetch(`169.254.169.254/v1/deletion-cost`, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        Metadata: "true",
+      },
+      body: JSON.stringify({ deletion_cost: cost }),
+    });
+    if (!resp.ok) {
+      const body = await resp.text();
+      log.error(`${resp.status}: Failed to set deletion cost: ${body}`);
+    }
+  } catch (error: any) {
+    log.error(`Failed to set deletion cost: ${error.message}`);
+  }
 }
 
 export async function recreateMe(log: Logger): Promise<void> {

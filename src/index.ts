@@ -400,9 +400,6 @@ async function main() {
     } else {
       log.info("No storage configuration provided, skipping file sync");
     }
-    if (state.getState().isUploadingFinalArtifacts === 0) {
-      await setDeletionCost(2, log);
-    }
 
     /**
      * Run the command configured by the job, and then handle the outcome of that.
