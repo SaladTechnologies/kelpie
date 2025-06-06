@@ -10,7 +10,7 @@ let {
   KELPIE_API_KEY,
   SALAD_API_KEY,
   SALAD_PROJECT,
-
+  SALAD_ORGANIZATION,
   SALAD_MACHINE_ID = "",
   SALAD_CONTAINER_GROUP_ID = "",
   MAX_RETRIES = "3",
@@ -46,7 +46,7 @@ if (KELPIE_API_KEY) {
 } else if (SALAD_API_KEY) {
   headers["Salad-Api-Key"] = SALAD_API_KEY;
 }
-let saladOrgName: string | undefined;
+let saladOrgName = SALAD_ORGANIZATION;
 
 /**
  * Get the headers to be used for API requests.
