@@ -37,6 +37,7 @@ if (!KELPIE_API_KEY && !SALAD_API_KEY && !SALAD_PROJECT) {
 
 const maxRetries = parseInt(MAX_RETRIES, 10);
 const maxJobFailures = parseInt(MAX_JOB_FAILURES, 10);
+const imdsUrl = "http://169.254.169.254";
 
 const headers: Record<string, string> = {
   "Content-Type": "application/json",
@@ -273,7 +274,7 @@ export async function setDeletionCost(
 ): Promise<void> {
   log.info(`Setting deletion cost to ${cost}`);
   try {
-    const resp = await fetch(`169.254.169.254/v1/deletion-cost`, {
+    const resp = await fetch(`${imdsUrl}/v1/deletion-cost`, {
       method: "PUT",
       headers: {
         "Content-Type": "application/json",
@@ -304,7 +305,7 @@ async function getSaladJWT(
 ): Promise<{ token: string; header: any; payload: any }> {
   try {
     const { jwt: token } = await fetchUpToNTimes<{ jwt: string }>(
-      "http://169.254.169.254/v1/token",
+      `${imdsUrl}/v1/token`,
       {
         method: "GET",
         headers: {
