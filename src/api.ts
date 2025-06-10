@@ -6,8 +6,11 @@ import { SaladCloudImdsSdk } from "@saladtechnologies-oss/salad-cloud-imds-sdk";
 import state from "./state";
 
 let {
-  KELPIE_API_URL,
+  KELPIE_API_URL = "https://kelpie.saladexamples.com",
   KELPIE_API_KEY,
+  SALAD_API_KEY,
+  SALAD_PROJECT,
+  SALAD_ORGANIZATION,
   SALAD_MACHINE_ID = "",
   SALAD_CONTAINER_GROUP_ID = "",
   MAX_RETRIES = "3",
@@ -15,19 +18,73 @@ let {
 } = process.env;
 
 assert(KELPIE_API_URL, "KELPIE_API_URL is required");
-assert(KELPIE_API_KEY, "KELPIE_API_KEY is required");
 
 if (KELPIE_API_URL.endsWith("/")) {
   KELPIE_API_URL = KELPIE_API_URL.slice(0, -1);
 }
 
+if (SALAD_API_KEY && !SALAD_PROJECT) {
+  throw new Error(
+    "SALAD_API_KEY is set but SALAD_PROJECT is not. Please set SALAD_PROJECT to the name of your Salad project."
+  );
+}
+
+if (!KELPIE_API_KEY && !SALAD_API_KEY && !SALAD_PROJECT) {
+  throw new Error(
+    "JWT Authentication requested, but no SALAD_PROJECT is defined. Please set SALAD_PROJECT to the name of your Salad project."
+  );
+}
+
 const maxRetries = parseInt(MAX_RETRIES, 10);
 const maxJobFailures = parseInt(MAX_JOB_FAILURES, 10);
 
-const headers = {
+const headers: Record<string, string> = {
   "Content-Type": "application/json",
-  "X-Kelpie-Key": KELPIE_API_KEY,
 };
+if (KELPIE_API_KEY) {
+  headers["X-Kelpie-Key"] = KELPIE_API_KEY;
+} else if (SALAD_API_KEY) {
+  headers["Salad-Api-Key"] = SALAD_API_KEY;
+}
+let saladOrgName = SALAD_ORGANIZATION;
+
+/**
+ * Get the headers to be used for API requests.
+ *
+ * If KELPIE_API_KEY is set, it will return the headers with the KELPIE_API_KEY.
+ * If SALAD_API_KEY is set, it will return the headers with the Salad API key, organization name, and project.
+ * If neither is set, it will fetch a JWT token from the Salad IMDS and return the headers with the JWT token, and project.
+ *
+ * @returns A promise that resolves to the headers to be used for API requests.
+ */
+async function getHeaders(): Promise<Record<string, string>> {
+  if (KELPIE_API_KEY) {
+    return headers;
+  }
+  let saladJWT: string | undefined;
+  if (!saladOrgName) {
+    const {
+      token,
+      payload: { salad_organization_name },
+    } = await getSaladJWT(baseLogger);
+    saladOrgName = salad_organization_name as string;
+    saladJWT = token;
+  }
+  if (SALAD_API_KEY) {
+    headers["Salad-Organization"] = saladOrgName;
+    headers["Salad-Project"] = SALAD_PROJECT!;
+    return headers;
+  }
+
+  if (!saladJWT) {
+    const { token } = await getSaladJWT(baseLogger);
+    saladJWT = token;
+  }
+  headers["Authorization"] = `Bearer ${saladJWT}`;
+  headers["Salad-Project"] = SALAD_PROJECT!;
+
+  return headers;
+}
 
 const imds = new SaladCloudImdsSdk({});
 
@@ -73,7 +130,7 @@ export async function getWork(): Promise<Task | null> {
     `${KELPIE_API_URL}/work?${query}`,
     {
       method: "GET",
-      headers,
+      headers: await getHeaders(),
     },
     maxRetries
   );
@@ -92,7 +149,7 @@ export async function sendHeartbeat(
     `${KELPIE_API_URL}/jobs/${jobId}/heartbeat`,
     {
       method: "POST",
-      headers,
+      headers: await getHeaders(),
       body: JSON.stringify({
         machine_id: SALAD_MACHINE_ID,
         container_group_id: SALAD_CONTAINER_GROUP_ID,
@@ -112,7 +169,7 @@ export async function reportFailed(jobId: string, log: Logger): Promise<void> {
     `${KELPIE_API_URL}/jobs/${jobId}/failed`,
     {
       method: "POST",
-      headers,
+      headers: await getHeaders(),
       body: JSON.stringify({
         machine_id: SALAD_MACHINE_ID,
         container_group_id: SALAD_CONTAINER_GROUP_ID,
@@ -130,7 +187,7 @@ export async function reportFailed(jobId: string, log: Logger): Promise<void> {
 export async function reallocateMe(reason: string, log: Logger): Promise<void> {
   try {
     log.info("Reallocating container via IMDS");
-    await imds.metadata.reallocateContainer({
+    await imds.metadata.reallocate({
       reason,
     });
   } catch (e: any) {
@@ -150,7 +207,7 @@ export async function reportCompleted(
     `${KELPIE_API_URL}/jobs/${jobId}/completed`,
     {
       method: "POST",
-      headers,
+      headers: await getHeaders(),
       body: JSON.stringify({
         machine_id: SALAD_MACHINE_ID,
         container_group_id: SALAD_CONTAINER_GROUP_ID,
@@ -166,6 +223,7 @@ export class HeartbeatManager {
   private jobId: string;
   private waiter: Promise<void> | null = null;
   private log: Logger;
+  private numHeartbeats: number = 0;
 
   constructor(jobId: string, log: Logger) {
     this.log = log;
@@ -181,11 +239,15 @@ export class HeartbeatManager {
     this.log.info("Heartbeat started.");
 
     while (this.active) {
-      const { status } = await sendHeartbeat(this.jobId, this.log); // Call your sendHeartbeat function
+      const { status } = await sendHeartbeat(this.jobId, this.log);
+      this.numHeartbeats++;
       if (status === "canceled") {
         this.log.info("Job was canceled, stopping heartbeat.");
         await onCanceled();
         break;
+      }
+      if (state.getState().isUploadingFinalArtifacts === 0) {
+        await setDeletionCost(this.numHeartbeats + 2, this.log);
       }
       this.waiter = sleep(interval_s * 1000);
       await this.waiter; // Wait for 30 seconds before the next heartbeat
@@ -203,4 +265,69 @@ export class HeartbeatManager {
       this.waiter = null;
     }
   }
+}
+
+export async function setDeletionCost(
+  cost: number,
+  log: Logger
+): Promise<void> {
+  log.info(`Setting deletion cost to ${cost}`);
+  try {
+    const resp = await fetch(`169.254.169.254/v1/deletion-cost`, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        Metadata: "true",
+      },
+      body: JSON.stringify({ deletion_cost: cost }),
+    });
+    if (!resp.ok) {
+      const body = await resp.text();
+      log.error(`${resp.status}: Failed to set deletion cost: ${body}`);
+    }
+  } catch (error: any) {
+    log.error(`Failed to set deletion cost: ${error.message}`);
+  }
+}
+
+export async function recreateMe(log: Logger): Promise<void> {
+  log.info("Recreating container via IMDS");
+  try {
+    await imds.metadata.recreate();
+  } catch (e: any) {
+    log.error(`Failed to recreate container via IMDS: ${e.message}`);
+  }
+}
+
+async function getSaladJWT(
+  log: Logger
+): Promise<{ token: string; header: any; payload: any }> {
+  try {
+    const { jwt: token } = await fetchUpToNTimes<{ jwt: string }>(
+      "http://169.254.169.254/v1/token",
+      {
+        method: "GET",
+        headers: {
+          Metadata: "true",
+        },
+      },
+      3,
+      log
+    );
+    const { header, payload } = decodeJWT(token);
+    return { token, header, payload };
+  } catch (e: any) {
+    log.error(e.message);
+    throw new Error("Failed to get token");
+  }
+}
+
+function decodeJWT(token: string): { header: any; payload: any } {
+  const [header, payload, signature] = token.split(".");
+  const decodedHeader = Buffer.from(header, "base64").toString();
+  const decodedPayload = Buffer.from(payload, "base64").toString();
+  return {
+    header: JSON.parse(decodedHeader),
+    payload: JSON.parse(decodedPayload),
+  };
 }

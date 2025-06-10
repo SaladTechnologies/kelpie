@@ -1,6 +1,6 @@
 {
   "name": "kelpie",
-  "version": "0.5.1",
+  "version": "0.6.0",
   "description": "A worker binary to coordinate long running jobs on salad. Works with Kelpie API",
   "main": "dist/index.js",
   "scripts": {
@@ -21,7 +21,7 @@
   "dependencies": {
     "@aws-sdk/client-s3": "^3.556.0",
     "@aws-sdk/lib-storage": "^3.556.0",
-    "@saladtechnologies-oss/salad-cloud-imds-sdk": "^0.9.0-alpha.4",
+    "@saladtechnologies-oss/salad-cloud-imds-sdk": "^0.9.0-alpha.5",
     "@smithy/node-http-handler": "^3.3.1",
     "chokidar": "^3.6.0",
     "pino": "^9.0.0"
