@@ -97,11 +97,12 @@ Upload your docker image to the container registry of your choice. Salad support
 | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------- | -------- |
 | KELPIE_API_URL               | The URL for the Kelpie API                                                                                                                                                                                                | `https://kelpie.saladexamples.com` | no       |
 | KELPIE_API_KEY               | The API key for authenticating with the Kelpie API                                                                                                                                                                        | None                               | No       |
+| KELPIE_STATE_FILE            | The path to the kelpie state file. This file is used to store the state of the kelpie worker, including the current job, and any in-progress uploads/downloads.                                                           | `./kelpie-state.json`              | No       |
 | SALAD_API_KEY                | The API key for authenticating with the Salad API and the Kelpie API.                                                                                                                                                     | None                               | No       |
 | SALAD_MACHINE_ID             | The ID of the Salad machine                                                                                                                                                                                               | *set dynamically by Salad*         | No       |
 | SALAD_CONTAINER_GROUP_ID     | The ID of the Salad container group                                                                                                                                                                                       | *set dynamically by Salad*         | No       |
-| SALAD_ORGANIZATION           | The name of your Salad organization. This can be determined automatically when running on a Salad Node, or can be set manually for testing purposes.                                                                      | *set dynamically by Salad*         | No       |
-| SALAD_PROJECT                | The name of your Salad project. Must be set if using Salad API Key, or relying on IMDS JWT for authentication.                                                                                                            | None                               | No       |
+| SALAD_ORGANIZATION_NAME      | The name of your Salad organization. This can be determined automatically when running on a Salad Node, or can be set manually for testing purposes.                                                                      | *set dynamically by Salad*         | No       |
+| SALAD_PROJECT_NAME           | The name of your Salad project. This can be determined automatically when running on a Salad Node, or can be set manually for testing purposes.                                                                           | None                               | No       |
 | MAX_RETRIES                  | The maximum number of retries for API operations                                                                                                                                                                          | "3"                                | No       |
 | MAX_JOB_FAILURES             | The maximum number of job failures allowed before an instance should reallocate.                                                                                                                                          | "3"                                | No       |
 | MAX_TIME_WITH_NO_WORK_S      | The maximum time to wait for work before exiting. May be exceeded by up to 10 seconds (1 heartbeat interval)                                                                                                              | "0" (Never)                        | No       |
@@ -153,7 +154,7 @@ Many Kelpie operations are specific to a Salad organization and project, so thes
 
 Kelpie workers will use a JWT issued by the Salad Instance Metadata Service (IMDS) to authenticate themselves to the Kelpie API. This JWT is automatically provided by the Salad Container Group when the worker is running inside a Salad Container Group. This JWT is included in the `Authorization` header of all requests made by the Kelpie worker to the Kelpie API as a Bearer token. A kelpie user object is created for each organization that authenticates this way.
 
-Kelpie will also include the required `Salad-Project` header, using a value found in the environment variable `SALAD_PROJECT` set by you when configuring your container group.
+Kelpie will also include the required `Salad-Project` header, using a value found in the environment variable `SALAD_PROJECT_NAME` that is present on the worker. This variable can be set manually for testing purposes, but is automatically set by Salad when running on a Salad Node.
 
 ### LEGACY: Kelpie API Key
 
@@ -170,8 +171,8 @@ And you must include `KELPIE_API_KEY` in your environment variables when running
 The kelpie worker looks for the following authorization methods, in order:
 
 1. **LEGACY** `KELPIE_API_KEY` environment variable
-2. `SALAD_API_KEY` environment variable, plus `SALAD_ORGANIZATION` and `SALAD_PROJECT` environment variables. Can derive organization from the IMDS JWT if running on a Salad Node.
-3. IMDS JWT and `SALAD_PROJECT` environment variable.
+2. `SALAD_API_KEY` environment variable, plus `SALAD_ORGANIZATION_NAME` and `SALAD_PROJECT_NAME` environment variables. Can derive org and project name from the environment if running on a Salad Node.
+3. IMDS JWT and `SALAD_PROJECT_NAME` and `SALAD_ORGANIZATION_NAME` environment variable.
 
 ## Queueing a job
 
@@ -675,3 +676,23 @@ Webhook status may be `running`, `failed`, or `completed`
 ### Webhook Authorization
 
 Webhooks sent by the Kelpie API will be secured with your API token in the `X-Kelpie-Key` header. This value will be an empty string if you are using the Salad API Key or IMDS JWT for authorization. Job data is not sent over the webhook, just IDs and status.
+
+## Running Multiple Workers Per Node
+
+You can run multiple kelpie workers on a single Salad Node, if you want to increase the number of concurrent jobs that can be processed on a single node. This is useful if your jobs are not GPU-bound, and you want to maximize the utilization of your CPU and RAM resources, or if there are multiple GPUs available on the node, and you want to run one worker per GPU.
+There are several things you need to consider in order to find success with this:
+
+1. Set the value of `KELPIE_STATE_FILE` to a unique value for each worker. This ensures that each worker has its own state file, and does not interfere with the state of other workers. Failure to do this will result in workers overwriting each other's state, leading to unpredictable behavior.
+2. Ensure that your jobs do not interfere with each other. This means that you should not have multiple jobs writing to the same local path, or uploading to the same bucket and prefix. Your jobs can have separate environments, as the per-job environment variables are passed directly into the job command, so there is no risk of environment variable collision.
+3. Ensure that your jobs do not exceed the resources available on the node. This means that you should monitor the CPU, RAM, and GPU usage of your jobs, and ensure that they do not exceed the resources available on the node. If your jobs are GPU-bound, you should ensure that each job is assigned to a specific GPU, and that no two jobs are assigned to the same GPU.
+
+Setting this up in your container is easy:
+
+```bash
+num_workers=4
+for i in $(seq 1 $num_workers); do
+  # Start each worker in the background
+  KELPIE_STATE_FILE="/kelpie-state-$i.json" /kelpie &
+done
+wait # wait for all workers to exit
+```

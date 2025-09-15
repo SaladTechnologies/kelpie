@@ -10,7 +10,9 @@ let {
   KELPIE_API_KEY,
   SALAD_API_KEY,
   SALAD_PROJECT,
+  SALAD_PROJECT_NAME,
   SALAD_ORGANIZATION,
+  SALAD_ORGANIZATION_NAME,
   SALAD_MACHINE_ID = "",
   SALAD_CONTAINER_GROUP_ID = "",
   MAX_RETRIES = "3",
@@ -23,15 +25,19 @@ if (KELPIE_API_URL.endsWith("/")) {
   KELPIE_API_URL = KELPIE_API_URL.slice(0, -1);
 }
 
-if (SALAD_API_KEY && !SALAD_PROJECT) {
+if (SALAD_API_KEY && !(SALAD_PROJECT || SALAD_PROJECT_NAME)) {
   throw new Error(
-    "SALAD_API_KEY is set but SALAD_PROJECT is not. Please set SALAD_PROJECT to the name of your Salad project."
+    "SALAD_API_KEY is set but SALAD_PROJECT_NAME is not. Please set SALAD_PROJECT_NAME to the name of your Salad project."
   );
 }
 
-if (!KELPIE_API_KEY && !SALAD_API_KEY && !SALAD_PROJECT) {
+if (
+  !KELPIE_API_KEY &&
+  !SALAD_API_KEY &&
+  !(SALAD_PROJECT || SALAD_PROJECT_NAME)
+) {
   throw new Error(
-    "JWT Authentication requested, but no SALAD_PROJECT is defined. Please set SALAD_PROJECT to the name of your Salad project."
+    "JWT Authentication requested, but no SALAD_PROJECT_NAME is defined. Please set SALAD_PROJECT_NAME to the name of your Salad project."
   );
 }
 
@@ -47,7 +53,8 @@ if (KELPIE_API_KEY) {
 } else if (SALAD_API_KEY) {
   headers["Salad-Api-Key"] = SALAD_API_KEY;
 }
-let saladOrgName = SALAD_ORGANIZATION;
+let saladOrgName = SALAD_ORGANIZATION ?? SALAD_ORGANIZATION_NAME;
+let saladProjectName = SALAD_PROJECT ?? SALAD_PROJECT_NAME;
 
 /**
  * Get the headers to be used for API requests.
@@ -71,9 +78,14 @@ async function getHeaders(): Promise<Record<string, string>> {
     saladOrgName = salad_organization_name as string;
     saladJWT = token;
   }
+  if (!saladProjectName) {
+    throw new Error(
+      "SALAD_PROJECT_NAME is not set and could not be determined from IMDS. Please set SALAD_PROJECT_NAME to the name of your Salad project."
+    );
+  }
   if (SALAD_API_KEY) {
     headers["Salad-Organization"] = saladOrgName;
-    headers["Salad-Project"] = SALAD_PROJECT!;
+    headers["Salad-Project"] = saladProjectName;
     return headers;
   }
 
@@ -82,7 +94,7 @@ async function getHeaders(): Promise<Record<string, string>> {
     saladJWT = token;
   }
   headers["Authorization"] = `Bearer ${saladJWT}`;
-  headers["Salad-Project"] = SALAD_PROJECT!;
+  headers["Salad-Project"] = saladProjectName;
 
   return headers;
 }
