@@ -92,7 +92,7 @@ export function getJSONState(): any {
 export async function saveState(log: Logger): Promise<void> {
   try {
     await fs.writeFile(filename, getJSONState());
-  } catch (err) {
+  } catch (err: any) {
     log.error("Error saving state: ", err);
   }
 }
