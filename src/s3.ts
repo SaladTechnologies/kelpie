@@ -121,7 +121,7 @@ export async function uploadFile(
     // Wait for the upload to finish
     await parallelUploads3.done();
     log.info("Upload completed successfully");
-  } catch (err) {
+  } catch (err: any) {
     log.error("Error uploading file: ", err);
   }
   await state.finishUpload(jobId, localFilePath, log);
@@ -341,7 +341,7 @@ export async function downloadAllFilesFromPrefix({
     log.info(
       `All files from s3://${bucket}/${prefix} downloaded to ${outputDir} successfully`
     );
-  } catch (err) {
+  } catch (err: any) {
     log.error("Error downloading files: ", err);
   }
 }
@@ -413,7 +413,7 @@ export async function uploadDirectory({
       );
     }
     log.info("Directory uploaded successfully");
-  } catch (err) {
+  } catch (err: any) {
     log.error("Error uploading directory: ", err);
   }
 }
@@ -452,7 +452,7 @@ export async function deleteFile(
     };
     await s3Client.send(new DeleteObjectCommand(params));
     log.info("File deleted successfully");
-  } catch (err) {
+  } catch (err: any) {
     log.error("Error deleting file: ", err);
   }
 }
