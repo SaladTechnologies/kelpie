@@ -1,6 +1,6 @@
 {
   "name": "kelpie",
-  "version": "0.6.1",
+  "version": "0.7.0",
   "description": "A worker binary to coordinate long running jobs on salad. Works with Kelpie API",
   "main": "dist/index.js",
   "scripts": {
