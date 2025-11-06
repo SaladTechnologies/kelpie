@@ -51,28 +51,42 @@ function waitForFileStability(filePath: string): Promise<void> {
   });
 }
 
-function debounceByArg<T extends (...args: any[]) => any, K>(
+type DebouncedResult<T> =
+  | { ok: true; value: T }
+  | { ok: false; reason: "canceled" };
+
+function debounceByArg<T extends (...a: any[]) => any, K>(
   fn: T,
   delay: number,
-  keyFn: (...args: Parameters<T>) => K
-): (...args: Parameters<T>) => Promise<ReturnType<T>> {
+  keyFn: (...a: Parameters<T>) => K
+): (...a: Parameters<T>) => Promise<DebouncedResult<Awaited<ReturnType<T>>>> {
   const timers = new Map<K, NodeJS.Timeout>();
+  const settles = new Map<K, (v: DebouncedResult<any>) => void>(); // last settles per key
 
   return (...args: Parameters<T>) =>
-    new Promise<ReturnType<T>>((resolve, reject) => {
+    new Promise((resolve, reject) => {
       const key = keyFn(...args);
-      if (timers.has(key)) clearTimeout(timers.get(key)!);
 
-      const timer = setTimeout(async () => {
+      // cancel previous
+      if (timers.has(key)) {
+        clearTimeout(timers.get(key)!);
+        settles.get(key)?.({ ok: false, reason: "canceled" }); // settle previous
+      }
+
+      settles.set(key, resolve);
+
+      const t = setTimeout(async () => {
         timers.delete(key);
+        settles.delete(key);
         try {
-          resolve(await fn(...args));
-        } catch (err) {
-          reject(err);
+          const v = await fn(...args);
+          resolve({ ok: true, value: v });
+        } catch (e: any) {
+          reject(e);
         }
       }, delay);
 
-      timers.set(key, timer);
+      timers.set(key, t);
     });
 }
 
@@ -110,7 +124,17 @@ export class DirectoryWatcher {
       }
       this.log.debug(`Event: add on ${path}`);
       const task = debouncedWaitForFileStability(path)
-        .then(() => forEachFile(path, "add"))
+        .then(({ ok }) => {
+          if (!ok) {
+            this.log.debug(
+              `Add event for ${path} was canceled due to debounce`
+            );
+            return;
+          }
+          forEachFile(path, "add").catch((err) => {
+            this.log.error(`Error processing file ${path} after add: ${err}`);
+          });
+        })
         .catch(async (err) => {
           // Check if file still exists
           try {
@@ -132,7 +156,19 @@ export class DirectoryWatcher {
       }
       this.log.debug(`Event: change on ${path}`);
       const task = debouncedWaitForFileStability(path)
-        .then(() => forEachFile(path, "change"))
+        .then(({ ok }) => {
+          if (!ok) {
+            this.log.debug(
+              `Change event for ${path} was canceled due to debounce`
+            );
+            return;
+          }
+          forEachFile(path, "change").catch((err) => {
+            this.log.error(
+              `Error processing file ${path} after change: ${err}`
+            );
+          });
+        })
         .catch(async (err) => {
           // Check if file still exists
           try {
