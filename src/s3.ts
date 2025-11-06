@@ -15,6 +15,7 @@ import { createGzip, createGunzip } from "zlib";
 import { Logger } from "pino";
 import { SyncConfig } from "./types";
 import state from "./state";
+import mime from "mime-types";
 
 const { AWS_REGION, AWS_DEFAULT_REGION } = process.env;
 
@@ -25,6 +26,12 @@ const s3Client = new S3Client({
     connectionTimeout: 10000,
   }),
 });
+
+function guessMimeType(filePath: string): string {
+  const mimeType =
+    mime.lookup(path.extname(filePath)) || "application/octet-stream";
+  return mimeType;
+}
 
 function getDataRatioString(
   loaded: number | undefined,
@@ -94,6 +101,8 @@ export async function uploadFile(
       Bucket: bucketName,
       Key: key,
       Body: stream,
+      ContentType: guessMimeType(localFilePath),
+      ContentEncoding: compress ? "gzip" : undefined,
     };
 
     // Perform the upload

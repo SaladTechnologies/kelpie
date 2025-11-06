@@ -4,6 +4,16 @@ import { Stats } from "fs";
 import fs from "fs";
 import { Logger } from "pino";
 
+const {
+  FILE_WATCHER_DEBOUNCE_MS = "0",
+  FILE_WATCHER_STABILITY_CHECK_MS = "50",
+} = process.env;
+const fileWatcherStabilityCheckMs = parseInt(
+  FILE_WATCHER_STABILITY_CHECK_MS,
+  10
+);
+const fileWatcherDebounceMs = parseInt(FILE_WATCHER_DEBOUNCE_MS, 10);
+
 // Function to check if the file has stopped changing
 function waitForFileStability(filePath: string): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -13,8 +23,11 @@ function waitForFileStability(filePath: string): Promise<void> {
     const checkFile = () => {
       fs.stat(filePath, (err, stats) => {
         if (err) {
-          reject(`Error accessing file: ${err}`);
-          return;
+          // If file disappeared, treat as “stable” (nothing to process)
+          if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+            return resolve();
+          }
+          return reject(`Error accessing file: ${err}`);
         }
 
         if (stats.size === lastKnownSize) {
@@ -23,12 +36,12 @@ function waitForFileStability(filePath: string): Promise<void> {
             resolve();
           } else {
             retries++;
-            setTimeout(checkFile, 50);
+            setTimeout(checkFile, fileWatcherStabilityCheckMs);
           }
         } else {
           lastKnownSize = stats.size;
           retries = 0;
-          setTimeout(checkFile, 50);
+          setTimeout(checkFile, fileWatcherStabilityCheckMs);
         }
       });
     };
@@ -36,6 +49,51 @@ function waitForFileStability(filePath: string): Promise<void> {
     checkFile();
   });
 }
+
+type DebouncedResult<T> =
+  | { ok: true; value: T }
+  | { ok: false; reason: "canceled" };
+
+function debounceByArg<T extends (...a: any[]) => any, K>(
+  fn: T,
+  delay: number,
+  keyFn: (...a: Parameters<T>) => K
+): (...a: Parameters<T>) => Promise<DebouncedResult<Awaited<ReturnType<T>>>> {
+  const timers = new Map<K, NodeJS.Timeout>();
+  const settles = new Map<K, (v: DebouncedResult<any>) => void>(); // last settles per key
+
+  return (...args: Parameters<T>) =>
+    new Promise((resolve, reject) => {
+      const key = keyFn(...args);
+
+      // cancel previous
+      if (timers.has(key)) {
+        clearTimeout(timers.get(key)!);
+        settles.get(key)?.({ ok: false, reason: "canceled" }); // settle previous
+      }
+
+      settles.set(key, resolve);
+
+      const t = setTimeout(async () => {
+        timers.delete(key);
+        settles.delete(key);
+        try {
+          const v = await fn(...args);
+          resolve({ ok: true, value: v });
+        } catch (e: any) {
+          reject(e);
+        }
+      }, delay);
+
+      timers.set(key, t);
+    });
+}
+
+const debouncedWaitForFileStability = debounceByArg(
+  waitForFileStability,
+  fileWatcherDebounceMs,
+  (filePath: string) => filePath
+);
 
 export class DirectoryWatcher {
   private watcher: FSWatcher | null = null;
@@ -64,9 +122,20 @@ export class DirectoryWatcher {
         return;
       }
       this.log.debug(`Event: add on ${path}`);
-      const task = waitForFileStability(path)
-        .then(() => forEachFile(path, "add"))
+      const task = debouncedWaitForFileStability(path)
+        .then(({ ok }) => {
+          if (!ok) {
+            this.log.debug(
+              `Add event for ${path} was canceled due to debounce`
+            );
+            return;
+          }
+          forEachFile(path, "add").catch((err) => {
+            this.log.error(`Error processing file ${path} after add: ${err}`);
+          });
+        })
         .catch(async (err) => {
+          // Check if file still exists
           try {
             await fsPromises.stat(path);
           } catch (e) {
@@ -85,9 +154,28 @@ export class DirectoryWatcher {
         return;
       }
       this.log.debug(`Event: change on ${path}`);
-      const task = waitForFileStability(path)
-        .then(() => forEachFile(path, "change"))
-        .catch((err) => {
+      const task = debouncedWaitForFileStability(path)
+        .then(({ ok }) => {
+          if (!ok) {
+            this.log.debug(
+              `Change event for ${path} was canceled due to debounce`
+            );
+            return;
+          }
+          forEachFile(path, "change").catch((err) => {
+            this.log.error(
+              `Error processing file ${path} after change: ${err}`
+            );
+          });
+        })
+        .catch(async (err) => {
+          // Check if file still exists
+          try {
+            await fsPromises.stat(path);
+          } catch {
+            return;
+          }
+          this.log.error(`Error processing file ${path} after change: ${err}`);
           this.log.error(`Error processing file ${path} after change: ${err}`);
         })
         .finally(() => {
@@ -123,14 +211,14 @@ export class DirectoryWatcher {
       this.log.info(`Stopping directory watcher: ${this.directory}`);
       await Promise.all(this.activeTasks); // Wait for all tasks to complete
       this.log.info("All tasks completed.");
-      this.watcher.close(); // Close the watcher to free up resources
+      await this.watcher.close(); // Close the watcher to free up resources
       this.watcher = null;
       this.log.info("Stopped watching directory.");
     }
   }
 }
 
-export async function recursivelyClearFilesInDirectory(
+export async function purgeDirectory(
   directory: string,
   log: Logger
 ): Promise<void> {

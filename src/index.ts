@@ -9,7 +9,7 @@ import {
   recreateMe,
   setDeletionCost,
 } from "./api";
-import { DirectoryWatcher, recursivelyClearFilesInDirectory } from "./files";
+import { DirectoryWatcher, purgeDirectory } from "./files";
 import {
   downloadAllFilesFromPrefix,
   uploadDirectory,
@@ -52,9 +52,7 @@ const recreateBetweenJobs = KELPIE_RECREATE_BETWEEN_JOBS === "true";
 const commandExecutor = new CommandExecutor();
 
 async function clearAllDirectories(dirsToClear: string[]): Promise<void> {
-  await Promise.all(
-    dirsToClear.map((dir) => recursivelyClearFilesInDirectory(dir, baseLogger))
-  );
+  await Promise.all(dirsToClear.map((dir) => purgeDirectory(dir, baseLogger)));
 }
 
 async function sleep(ms: number): Promise<void> {
