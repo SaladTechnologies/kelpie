@@ -7,7 +7,6 @@ import { Logger } from "pino";
 const {
   FILE_WATCHER_DEBOUNCE_MS = "0",
   FILE_WATCHER_STABILITY_CHECK_MS = "50",
-  FILE_WATCHER_MAX_STABILITY_WAIT_MS = "120000",
 } = process.env;
 const fileWatcherStabilityCheckMs = parseInt(
   FILE_WATCHER_STABILITY_CHECK_MS,
