@@ -6,6 +6,7 @@ import { Logger } from "pino";
 
 const {
   FILE_WATCHER_DEBOUNCE_MS = "0",
+  FILE_WATCHER_MAX_WAIT_MS = "5000",
   FILE_WATCHER_STABILITY_CHECK_MS = "50",
 } = process.env;
 const fileWatcherStabilityCheckMs = parseInt(
@@ -13,17 +14,29 @@ const fileWatcherStabilityCheckMs = parseInt(
   10
 );
 const fileWatcherDebounceMs = parseInt(FILE_WATCHER_DEBOUNCE_MS, 10);
+const fileWatcherMaxWaitMs = parseInt(FILE_WATCHER_MAX_WAIT_MS, 10);
 
 // Function to check if the file has stopped changing
-function waitForFileStability(filePath: string): Promise<void> {
+function waitForFileStability(
+  filePath: string,
+  maxWait: number
+): Promise<void> {
   return new Promise((resolve, reject) => {
     let lastKnownSize = -1;
     let retries = 0;
+    const startTime = Date.now();
 
     const checkFile = () => {
+      const timeElapsed = Date.now() - startTime;
+
+      // If max wait time has been exceeded, resolve immediately (only if maxWait > 0)
+      if (maxWait > 0 && timeElapsed >= maxWait) {
+        return resolve();
+      }
+
       fs.stat(filePath, (err, stats) => {
         if (err) {
-          // If file disappeared, treat as “stable” (nothing to process)
+          // If file disappeared, treat as "stable" (nothing to process)
           if ((err as NodeJS.ErrnoException).code === "ENOENT") {
             return resolve();
           }
@@ -57,14 +70,55 @@ type DebouncedResult<T> =
 function debounceByArg<T extends (...a: any[]) => any, K>(
   fn: T,
   delay: number,
+  maxWait: number,
   keyFn: (...a: Parameters<T>) => K
 ): (...a: Parameters<T>) => Promise<DebouncedResult<Awaited<ReturnType<T>>>> {
   const timers = new Map<K, NodeJS.Timeout>();
   const settles = new Map<K, (v: DebouncedResult<any>) => void>(); // last settles per key
+  const firstCallTimes = new Map<K, number>(); // track when the first call in a series occurred
+
+  const executeForKey = async (
+    key: K,
+    args: Parameters<T>,
+    resolve: (v: DebouncedResult<any>) => void,
+    reject: (e: any) => void
+  ) => {
+    timers.delete(key);
+    settles.delete(key);
+    firstCallTimes.delete(key);
+    try {
+      const v = await fn(...args);
+      return resolve({ ok: true, value: v });
+    } catch (e: any) {
+      return reject(e);
+    }
+  };
 
   return (...args: Parameters<T>) =>
     new Promise((resolve, reject) => {
       const key = keyFn(...args);
+      const now = Date.now();
+
+      // If this is the first call for this key, record the time
+      if (!firstCallTimes.has(key)) {
+        firstCallTimes.set(key, now);
+      }
+
+      const firstCallTime = firstCallTimes.get(key)!;
+      const timeElapsed = now - firstCallTime;
+
+      // If maxWait time has passed since the first call, execute immediately
+      if (timeElapsed >= maxWait && maxWait > 0) {
+        // cancel previous timer if any
+        if (timers.has(key)) {
+          clearTimeout(timers.get(key)!);
+          settles.get(key)?.({ ok: false, reason: "canceled" }); // settle previous
+        }
+
+        settles.set(key, resolve);
+        executeForKey(key, args, resolve, reject);
+        return;
+      }
 
       // cancel previous
       if (timers.has(key)) {
@@ -74,24 +128,22 @@ function debounceByArg<T extends (...a: any[]) => any, K>(
 
       settles.set(key, resolve);
 
+      // Calculate remaining time: use the smaller of delay or time until maxWait
+      const timeUntilMaxWait = maxWait - timeElapsed;
+      const waitTime = maxWait > 0 ? Math.min(delay, timeUntilMaxWait) : delay;
+
       const t = setTimeout(async () => {
-        timers.delete(key);
-        settles.delete(key);
-        try {
-          const v = await fn(...args);
-          resolve({ ok: true, value: v });
-        } catch (e: any) {
-          reject(e);
-        }
-      }, delay);
+        executeForKey(key, args, resolve, reject);
+      }, waitTime);
 
       timers.set(key, t);
     });
 }
 
 const debouncedWaitForFileStability = debounceByArg(
-  waitForFileStability,
+  (filePath: string) => waitForFileStability(filePath, fileWatcherMaxWaitMs),
   fileWatcherDebounceMs,
+  fileWatcherMaxWaitMs,
   (filePath: string) => filePath
 );
 
