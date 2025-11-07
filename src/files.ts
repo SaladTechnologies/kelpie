@@ -108,7 +108,7 @@ function debounceByArg<T extends (...a: any[]) => any, K>(
       const timeElapsed = now - firstCallTime;
 
       // If maxWait time has passed since the first call, execute immediately
-      if (timeElapsed >= maxWait) {
+      if (timeElapsed >= maxWait && maxWait > 0) {
         // cancel previous timer if any
         if (timers.has(key)) {
           clearTimeout(timers.get(key)!);
