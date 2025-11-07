@@ -29,8 +29,8 @@ function waitForFileStability(
     const checkFile = () => {
       const timeElapsed = Date.now() - startTime;
 
-      // If max wait time has been exceeded, resolve immediately
-      if (timeElapsed >= maxWait) {
+      // If max wait time has been exceeded, resolve immediately (only if maxWait > 0)
+      if (maxWait > 0 && timeElapsed >= maxWait) {
         return resolve();
       }
 
@@ -130,7 +130,7 @@ function debounceByArg<T extends (...a: any[]) => any, K>(
 
       // Calculate remaining time: use the smaller of delay or time until maxWait
       const timeUntilMaxWait = maxWait - timeElapsed;
-      const waitTime = Math.min(delay, timeUntilMaxWait);
+      const waitTime = maxWait > 0 ? Math.min(delay, timeUntilMaxWait) : delay;
 
       const t = setTimeout(async () => {
         executeForKey(key, args, resolve, reject);
